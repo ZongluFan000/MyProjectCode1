@@ -15,5 +15,9 @@ public class App {
         
         System.out.println("\n----------------------------");
         System.out.println("✅ 计算完成！");
+
+        1111
+        1111
+        1111
     }
 }
