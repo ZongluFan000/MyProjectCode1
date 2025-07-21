@@ -3,15 +3,15 @@ package yaku.uxntal;
 import java.util.*;
 
 public class Definitions {
-    // Token 类型定义
+    // Token type definition
     public enum TokenType {
-        MAIN,      // 主程序入口
-        INSTR,     // 指令
-        LIT,       // 栈常量（立即数）
-        LABEL,     // 标签定义
-        REF,       // 标签引用
-        RAW,       // 原始数据（字节或短字）
-        ADDR,      // 汇编起始地址
+        MAIN,      // Main Program Entry
+        INSTR,     // Directives
+        LIT,       // stack constant 
+        LABEL,     //  
+        REF,       // 
+        RAW,       // 
+        ADDR,      // assembly starting address
         PAD,       // 填充
         EMPTY,     // 空（未用）
         UNKNOWN    // 未知
@@ -40,7 +40,7 @@ public class Definitions {
         OPCODE_MAP.put("ADD", 0x18); OPCODE_MAP.put("SUB", 0x19); OPCODE_MAP.put("MUL", 0x1A); OPCODE_MAP.put("DIV", 0x1B);
         OPCODE_MAP.put("AND", 0x1C); OPCODE_MAP.put("ORA", 0x1D); OPCODE_MAP.put("EOR", 0x1E); OPCODE_MAP.put("SFT", 0x1F);
 
-        
+
         OPCODE_MAP.put("LIT", 0x80); // 0x80 是 Uxn 标准LIT指令
     }
 

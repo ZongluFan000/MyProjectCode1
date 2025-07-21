@@ -1,9 +1,4 @@
 |0100
 @Main
-#00 #2A  // 先压地址（高字节），再压值
-STA      // STA: [value][addr] -> 存储
-
-#00 #2A  // 重新压地址
-LDA      // LDA: [addr] -> 加载到栈顶
-
+BADINSTR
 BRK
