@@ -1,4 +1,7 @@
 |0100
-@Main
-BADINSTR
+@main
+#10
+#05
+ADD2
+DEO
 BRK
