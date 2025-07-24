@@ -115,11 +115,11 @@ import java.io.*;
 import static yaku.uxntal.Definitions.*;
 
 public class Parser {
-    // 用于 include 文件递归处理（避免重复 include）
+    //  include File recursive processing
     private Set<String> includedFiles = new HashSet<>();
 
     /**
-     * 主入口: 传入源码和可选文件名
+     * Main entry: pass in source code and filename
      */
     public List<Token> parse(String source) throws Exception {
         return parse(source, null, 1, null);
@@ -142,7 +142,6 @@ public class Parser {
             for (String mark : marks) {
                 if (mark.isEmpty()) continue;
 
-                // 这里 parseToken 可能返回多个 token
                 List<Token> tokenList = parseToken(mark, lineNum, fileName, fileMap);
                 for (Token t : tokenList) {
                     tokens.add(t);
@@ -154,7 +153,7 @@ public class Parser {
     }
 
     /**
-     * FSM方式处理嵌套和字符串内的注释，仿 Perl stripCommentsFSM
+     * FSM approach to handling nested and in-string comments
      */
     private String stripCommentsFSM(String src) {
         StringBuilder result = new StringBuilder();
@@ -162,12 +161,12 @@ public class Parser {
         int parenDepth = 0;
         for (int i = 0; i < src.length(); ++i) {
             char c = src.charAt(i);
-            // 处理字符串（"）
+            // deal（"）
             if (c == '"') inString = !inString;
-            // 注释区开始
+            // begin
             if (!inString && c == '(') {
                 parenDepth++;
-                // 跳过注释内容
+                // jump
                 while (parenDepth > 0 && ++i < src.length()) {
                     char cc = src.charAt(i);
                     if (cc == '"' ) inString = !inString;
@@ -184,16 +183,15 @@ public class Parser {
     }
 
     /**
-     * 解析单个 token，可返回1个或多个 token
+     * Parses a single token and returns one or more tokens.
      */
     private List<Token> parseToken(String mark, int lineNum, String fileName, Map<String, String> fileMap) throws Exception {
         List<Token> tokens = new ArrayList<>();
 
-        // include 文件 ~filename
+        // include  ~filename
         if (mark.startsWith("~")) {
             String includeFile = mark.substring(1);
             if (includedFiles.contains(includeFile)) {
-                // 防止死循环
                 return tokens;
             }
             includedFiles.add(includeFile);
@@ -202,27 +200,27 @@ public class Parser {
             if (fileMap != null && fileMap.containsKey(includeFile)) {
                 includeContent = fileMap.get(includeFile);
             } else {
-                // 默认直接文件读取
+                // read file
                 includeContent = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(includeFile)));
             }
-            // 递归 parse
+            // recursive  parse
             List<Token> incTokens = parse(includeContent, includeFile, 1, fileMap);
             tokens.addAll(incTokens);
             return tokens;
         }
 
-        // 宏（暂未支持）
+        // macro 
         if (mark.startsWith("%")) {
             throw new RuntimeException("Error: Macros not yet supported. at line: " + lineNum);
         }
 
-        // 块结构
+        // block
         if (mark.equals("[") || mark.equals("]")) {
-            // Perl返回空 token，这里直接略过即可
+        
             return tokens;
         }
 
-        // 字符串常量
+        // string constant
         if (mark.startsWith("\"")) {
             String raw = mark.substring(1);
             for (int i = 0; i < raw.length(); ++i) {
@@ -231,7 +229,7 @@ public class Parser {
             return tokens;
         }
 
-        // 常量 LIT (#10 #1234)
+        // LIT (#10 #1234)
         if (mark.startsWith("#")) {
             String hexStr = mark.substring(1);
             if (!hexStr.matches("[0-9a-fA-F]{2}|[0-9a-fA-F]{4}")) {
@@ -243,7 +241,7 @@ public class Parser {
             return tokens;
         }
 
-        // 引用 ;,._-=xxxx
+        // ref;,._-=xxxx
         if (mark.matches("^[;,.\\._\\-=].+")) {
             String prefix = mark.substring(0,1);
             String refName = mark.substring(1);
@@ -259,25 +257,25 @@ public class Parser {
             return tokens;
         }
 
-        // 父标签
+        // parent label
         if (mark.startsWith("@")) {
             tokens.add(new Token(TokenType.LABEL, mark.substring(1), 2, lineNum));
             return tokens;
         }
 
-        // 子标签
+        // sub label
         if (mark.startsWith("&")) {
             tokens.add(new Token(TokenType.LABEL, mark.substring(1), 1, lineNum));
             return tokens;
         }
 
-        // 主程序入口
+        // Main Program Entry
         if (mark.equals("|0100") || mark.equals("|100")) {
             tokens.add(new Token(TokenType.MAIN, "", 0, lineNum));
             return tokens;
         }
 
-        // 地址跳转
+        // address jumping
         if (mark.startsWith("|")) {
             String val = mark.substring(1);
             if (val.isEmpty()) throw new RuntimeException("Error: Invalid address token: " + mark + " at line: " + lineNum);
@@ -285,7 +283,7 @@ public class Parser {
             return tokens;
         }
 
-        // 填充
+        // padding
         if (mark.startsWith("$")) {
             String val = mark.substring(1);
             if (val.isEmpty()) throw new RuntimeException("Error: Invalid pad token: " + mark + " at line: " + lineNum);
@@ -293,7 +291,7 @@ public class Parser {
             return tokens;
         }
 
-        // Lambda/JCI结构
+        // Lambda/JCI
         if (mark.startsWith("?{")) {
             String lambdaName = "LAMBDA_" + lineNum;
             tokens.add(new Token(TokenType.INSTR, "JCI", 2, 0, 0, lineNum));
@@ -334,9 +332,9 @@ public class Parser {
             return tokens;
         }
 
-        // 指令/子例程调用/立即子例程
+        // Instruction/subroutine call/immediate subroutine
         if (mark.matches("^[A-Z]{3}[2kr]*$")) {
-            // 按长度和后缀解析
+            // Parsing by length and suffix
             String instr = mark.substring(0, 3);
             int sz = 1, r = 0, k = 0;
             if (mark.length() == 4) {
@@ -356,34 +354,34 @@ public class Parser {
                 tokens.add(new Token(TokenType.INSTR, instr, sz, r, k, lineNum));
                 return tokens;
             } else {
-                // 非指令三字母，直接子例程调用 JSI
+                // Non-instruction three-letter, direct subroutine call JSI
                 tokens.add(new Token(TokenType.INSTR, "JSI", 2, 0, 0, lineNum));
                 tokens.add(new Token(TokenType.REF, mark, 6, 0, lineNum));
                 return tokens;
             }
         }
 
-        // 原始 hex
+        // regoin hex
         if (mark.matches("^[a-f0-9]{2,4}$")) {
             int wordSz = (mark.length() == 2) ? 1 : 2;
             tokens.add(new Token(TokenType.RAW, mark, wordSz, lineNum));
             return tokens;
         }
 
-        // 即时子例程调用或普通符号
+        // Immediate subroutine calls or normal symbols
         if (mark.matches("^[<*+^\\w].+")) {
             tokens.add(new Token(TokenType.INSTR, "JSI", 2, 0, 0, lineNum));
             tokens.add(new Token(TokenType.REF, mark, 6, 0, lineNum));
             return tokens;
         }
 
-        // 其它未知
+        // other
         tokens.add(new Token(TokenType.UNKNOWN, mark, 0, lineNum));
         return tokens;
     }
 
     /**
-     * 多 token 的 flatten（例如字符串、lambda 返回多个）
+     *  token flatten
      */
     private List<Token> flattenTokens(List<Token> input) {
         List<Token> out = new ArrayList<>();

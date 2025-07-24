@@ -189,8 +189,8 @@ public class Interpreter {
     private String currentParent = "MAIN";
     private Deque<String> callStack = new ArrayDeque<>();
     private List<Deque<StackValue>> stacks = Arrays.asList(
-            new ArrayDeque<>(), // 工作栈 (0)
-            new ArrayDeque<>()  // 返回栈 (1)
+            new ArrayDeque<>(), // work (0)
+            new ArrayDeque<>()  // return (1)
     );
     private boolean running = true;
 
@@ -219,7 +219,7 @@ public class Interpreter {
             if (pc < 0 || pc > 0xFFFF) throw new RuntimeException("Program counter out of bounds.");
             Token token = fetchTokenFromMemory(pc);
 
-            // -------- Parent/CallStack 逻辑 (对应 Perl 解释器主循环) --------
+            // Parent/CallStack
             if (token.type == TokenType.INSTR) {
                 String instr = token.value;
                 int sz = token.size;
@@ -257,7 +257,7 @@ public class Interpreter {
                 }
             }
 
-            // -------- 指令执行 --------
+            //指令执行
             executeInstr(token);
 
             pc++;

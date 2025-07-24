@@ -40,22 +40,20 @@ package yaku.uxntal;
 import java.util.Objects;
 import yaku.uxntal.Definitions.TokenType;
 
-/**
- * 完全还原 Perl 的 Token 结构
- */
+
 public class Token {
     public TokenType type;
-    public String value;     // 指令名、标签名、引用名、内容
-    public int size;         // 数据字节、模式、标签/引用种类
+    public String value;     // Command name, tag name, reference name, content
+    public int size;         // Data bytes, patterns, labels/reference types
     public int stack;        // r
     public int keep;         // k
-    public int refType;      // 引用类型
-    public int isChild;      // 是否子标签/引用
-    public int line;         // 行号
-    public boolean group = false; // 是否为 token group（如lambda/字符串等）
+    public int refType;      
+    public int isChild;      // Whether to sub-tag/reference
+    public int line;         
+    public boolean group = false; //  token group
     private Token[] groupTokens = null;
 
-    // 最常用构造器：Instr/Label/Ref等
+    
     public Token(TokenType type, String value, int size, int stack, int keep, int line) {
         this.type = type;
         this.value = value;
@@ -64,21 +62,21 @@ public class Token {
         this.keep = keep;
         this.line = line;
     }
-    // 构造 for LIT/RAW
+    // for LIT/RAW
     public Token(TokenType type, String value, int size, int line) {
         this(type, value, size, 0, 0, line);
     }
-    // 构造 for simple（如 MAIN/ADDR/PAD/UNKNOWN/EMPTY）
+    // for simple（如 MAIN/ADDR/PAD/UNKNOWN/EMPTY）
     public Token(TokenType type, String value, int line) {
         this(type, value, 0, 0, 0, line);
     }
-    // 构造 for REF（含refType/isChild）
+    // for REF（含refType/isChild）
     public Token(TokenType type, String value, int refType, int isChild, int line) {
         this(type, value, 0, 0, 0, line);
         this.refType = refType;
         this.isChild = isChild;
     }
-    // 构造 group tokens
+    // group tokens
     public Token(Token[] groupTokens) {
         this.group = true;
         this.groupTokens = groupTokens;
@@ -90,7 +88,7 @@ public class Token {
         return groupTokens;
     }
 
-    // Perl中的各种类型判别/isXxx方法
+    // Various type discrimination
     public boolean isInstr() { return type == TokenType.INSTR; }
     public boolean isLit() { return type == TokenType.LIT; }
     public boolean isRaw() { return type == TokenType.RAW; }
@@ -103,7 +101,7 @@ public class Token {
     public boolean hasKeep() { return keep == 1; }
     public boolean hasName(String name) { return value.equals(name); }
 
-    // 便于Token间比较（tokensAreEqual/tokenEqual等）
+    // tokensAreEqual/tokenEqual
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

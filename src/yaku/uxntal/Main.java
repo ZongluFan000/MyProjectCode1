@@ -69,23 +69,98 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.List;
 
-public class Main {
-    public static void main(String[] args) throws Exception {
-        // 1. 读取 test.tal 文件
-        String fileName = "test.tal"; // 可放在项目根目录或指定绝对路径
-        String source = new String(Files.readAllBytes(Paths.get(fileName)), "UTF-8");
+// public class Main {
+//     public static void main(String[] args) throws Exception {
+//         // 1. 读取 test.tal 文件
+//         String fileName = "test.tal"; // 可放在项目根目录或指定绝对路径
+//         String source = new String(Files.readAllBytes(Paths.get(fileName)), "UTF-8");
 
-        // 2. 词法+语法分析
-        Parser parser = new Parser();
-        List<Token> tokens = parser.parse(source);
+//         // 2. 词法+语法分析
+//         Parser parser = new Parser();
+//         List<Token> tokens = parser.parse(source);
 
-        // 3. 汇编编码
-        Encoder encoder = new Encoder();
-        Encoder.EncodeResult encodeResult = encoder.encode(tokens);
+//         // 3. 汇编编码
+//         Encoder encoder = new Encoder();
+//         Encoder.EncodeResult encodeResult = encoder.encode(tokens);
 
-        // 4. 运行虚拟机解释器
-        Interpreter interpreter = new Interpreter(encodeResult.memory, encodeResult.reverseLabelTable);
-        interpreter.run();
-    }
-}
+//         // 4. 运行虚拟机解释器
+//         Interpreter interpreter = new Interpreter(encodeResult.memory, encodeResult.reverseLabelTable);
+//         interpreter.run();
+//     }
+// }
 
+// public class Main {
+//     public static void main(String[] args) throws Exception {
+//         // 1. 读取 test.tal 文件
+//         String fileName = "test.tal";
+//         String source = new String(Files.readAllBytes(Paths.get(fileName)), "UTF-8");
+
+//         // 2. 解析成 Token
+//         Parser parser = new Parser();
+//         List<Token> tokens = parser.parse(source);
+
+//         // 3. 语义/分配/寻址错误检查
+//         ErrorChecker checker = new ErrorChecker();
+//         try {
+//             checker.check(tokens);
+//             System.out.println("通过 ErrorChecker 检查，无严重错误。");
+//         } catch (RuntimeException e) {
+//             System.err.println("检测到错误，编译中止：" + e.getMessage());
+//             return;
+//         }
+
+//         // 4. 编码与解释执行（如无错误才继续）
+//         Encoder encoder = new Encoder();
+//         Encoder.EncodeResult encodeResult = encoder.encode(tokens);
+
+//         Interpreter interpreter = new Interpreter(encodeResult.memory, encodeResult.reverseLabelTable);
+//         interpreter.run();
+//     }
+// }
+
+// public class Main {
+//     public static void main(String[] args) throws Exception {
+//         // 1. 读取 test.tal 文件
+//         String fileName = "test.tal";
+//         String source = new String(Files.readAllBytes(Paths.get(fileName)), "UTF-8");
+
+//         // 2. 词法/语法分析为 token 列表
+//         Parser parser = new Parser();
+//         List<Token> tokens = parser.parse(source);
+
+//         // 3. 用 PrettyPrinter 美化并打印 token 序列
+//         System.out.println("====== Pretty Print ======");
+//         PrettyPrint.prettyPrint(tokens, false);
+
+//         // 4. 还可以获取字符串，用于保存到文件
+//         String prettySource = PrettyPrint.prettyPrintStr(tokens, false);
+//         //Files.write(Paths.get("pretty_test.tal"), prettySource.getBytes("UTF-8"));
+//     }
+// }
+
+
+// public class Main {
+//     public static void main(String[] args) throws Exception {
+//         // 1. 读取 test.tal 文件
+//         String fileName = "test.tal";
+//         String source = new String(Files.readAllBytes(Paths.get(fileName)), "UTF-8");
+
+//         // 2. 解析为 token 列表
+//         Parser parser = new Parser();
+//         List<Token> tokens = parser.parse(source);
+
+//         // 3. 编码为虚拟机内存
+//         Encoder encoder = new Encoder();
+//         Encoder.EncodeResult encodeResult = encoder.encode(tokens);
+
+//         // 4. 用 Assembler 精确导出 ROM（只保留有效区间，不带多余0）
+//         int startAddr = 0x0100; // uxntal 程序入口一般从0x0100开始
+//         String romFile = "out.rom";
+//         boolean writeRom = true;
+//         boolean verbose = true; // 打印导出ROM的内容
+
+//         Assembler.memToRom(encodeResult.memory, startAddr, writeRom, romFile, verbose);
+
+//         System.out.println("Assembler 测试完成！");
+//     }
+// }

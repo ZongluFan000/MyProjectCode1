@@ -96,13 +96,13 @@ public class Definitions {
         UNKNOWN, PLACEHOLDER, INCLUDE, STR, LD, ST
     }
 
-    // Token type 字符串到枚举的映射
+    // Token type 
     public static final List<String> TOKEN_TYPE_NAMES = Arrays.asList(
         "MAIN","LIT","INSTR","LABEL","REF","IREF","RAW","ADDR","PAD",
         "LAMBDA","EMPTY","UNKNOWN","PLACEHOLDER","INCLUDE","STR","LD","ST"
     );
 
-    // 引用类型定义
+    // Reference Type
     public enum RefType {
         DOT, COMMA, SEMI, DASH, UNDERSCORE, EQUALS, IMMED
     }
@@ -120,7 +120,7 @@ public class Definitions {
     public static final String[] REV_REF_TYPES = {".",",",";","-","_","=","I"};
     public static final int[] REF_WORD_SIZES = {1,1,2,1,1,1,2};
 
-    // 指令全集
+    // directives
     public static final Set<String> OPCODE_SET = new HashSet<>(Arrays.asList(
         "BRK","LIT","INC","POP","NIP","SWP","ROT","DUP","OVR",
         "EQU","NEQ","GTH","LTH","JMP","JCN","JSR","STH",
@@ -128,7 +128,7 @@ public class Definitions {
         "ADD","SUB","MUL","DIV","AND","ORA","EOR","SFT"
     ));
 
-    // 指令名到操作码
+    // Instruction name to opcode
     public static final Map<String, Integer> OPCODE_MAP = new HashMap<>();
     static {
         String[] opcodes = {
@@ -148,7 +148,7 @@ public class Definitions {
         }
     }
 
-    // 指令分类（举例，需根据 Perl 补全）
+    // Classification of commands (according to Perl)
     public static final Set<String> COMMUTATIVE_BINARY_OPS = new HashSet<>(Arrays.asList(
         "ADD","MUL","AND","ORA","EOR","NEQ","EQU"
     ));
@@ -167,11 +167,11 @@ public class Definitions {
         "POP","NIP","SWP","ROT","DUP","OVR","STH"
     ));
 
-    // 其它参数
+
     public static final int MAIN_ADDRESS = 0x0100;
     public static final int MEMORY_SIZE = 0x10000; // 64K
 
-    // 工具方法
+    // Tools and methodologies
     public static boolean isOpcode(String name) {
         return OPCODE_SET.contains(name.toUpperCase());
     }
