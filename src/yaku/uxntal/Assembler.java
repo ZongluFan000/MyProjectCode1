@@ -6,22 +6,53 @@ import java.util.List;
 
 public class Assembler {
     public static void main(String[] args) {
-        System.out.println("yaku-java assembler (compatible with Perl yaku)");
+        // 兼容 Perl yaku 参数
+        boolean wFlag = false;
+        boolean runFlag = false;
+        boolean assembleFlag = false; // 脚本里其实默认就是 true
+        boolean doPretty = false, checkOnly = false, verbose = false;
+        String inputFile = null;
+        String outputFile = null;
 
-        if (args.length < 2) {
-            System.err.println("用法: java yaku.uxntal.Assembler <输入文件.tal> <输出文件.rom> [--pretty] [--check-only] [--verbose]");
+        // 参数解析
+        for (String arg : args) {
+            switch (arg) {
+                case "-W":
+                    wFlag = true; verbose = true; // -W 视为 verbose
+                    break;
+                case "-r":
+                    runFlag = true;
+                    break;
+                case "-a":
+                    assembleFlag = true;
+                    break;
+                case "--pretty":
+                    doPretty = true;
+                    break;
+                case "--check-only":
+                    checkOnly = true;
+                    break;
+                case "--verbose":
+                    verbose = true;
+                    break;
+                default:
+                    if (arg.endsWith(".tal")) inputFile = arg;
+                    else if (arg.endsWith(".rom")) outputFile = arg;
+                    break;
+            }
+        }
+
+        if (inputFile == null) {
+            System.err.println("缺少输入文件（.tal）");
             System.exit(1);
         }
 
-        String inputFile = args[0];
-        String outputFile = args[1];
-        boolean doPretty = false, checkOnly = false, verbose = false;
-
-        for (String arg : args) {
-            if (arg.equals("--pretty")) doPretty = true;
-            if (arg.equals("--check-only")) checkOnly = true;
-            if (arg.equals("--verbose")) verbose = true;
+        if (outputFile == null) {
+            // 若没指定输出文件，自动替换 .tal 为 .rom
+            outputFile = inputFile.replaceAll("\\.tal$", ".rom");
         }
+
+        // ...参数解析部分不变...
 
         try {
             // 1. 读取源文件
@@ -31,7 +62,7 @@ public class Assembler {
             Parser parser = new Parser();
             List<Token> tokens = parser.parse(source);
 
-            // 3. pretty print（美化源码）
+            // 3. pretty print
             if (doPretty) {
                 System.out.println("====== Pretty Print ======");
                 PrettyPrint.prettyPrint(tokens, false);
@@ -50,21 +81,29 @@ public class Assembler {
             Encoder encoder = new Encoder();
             Encoder.EncodeResult encodeResult = encoder.encode(tokens);
 
-            // 6. 导出 ROM 文件（去除多余 0，和 Perl yaku 一致）
-            int startAddr = 0x0100; // uxntal 程序入口通常是 0x0100
+            // 如果是 run 模式，直接用解释器执行
+            if (runFlag) {
+                Interpreter interpreter = new Interpreter(
+                    encodeResult.memory, encodeResult.reverseLabelTable
+                );
+                interpreter.run();
+                return;
+            }
+
+            // 汇编导出 ROM
+            int startAddr = 0x0100;
             Assembler.memToRom(encodeResult.memory, startAddr, true, outputFile, verbose);
 
-            System.out.println("汇编完成，ROM 已写入: " + outputFile);
+            if (wFlag || verbose) System.out.println("汇编完成，ROM 已写入: " + outputFile);
+
         } catch (Exception e) {
             System.err.println("汇编失败: " + e.getMessage());
             e.printStackTrace();
             System.exit(2);
+            }
         }
-    }
 
-    /**
-     * 与前文 Assembler.memToRom 完全一致，用于导出 ROM 文件
-     */
+
     public static void memToRom(byte[] memory, int startAddr, boolean writeRom, String romFile, boolean verbose) throws Exception {
         int free = memory.length;
         byte[] bytes = new byte[free - startAddr];
@@ -85,7 +124,7 @@ public class Assembler {
 
         if (writeRom) {
             Files.write(Paths.get(romFile), outBytes);
-            System.out.println("已导出ROM: " + romFile + " (" + outBytes.length + " bytes)");
+            if (verbose) System.out.println("已导出ROM: " + romFile + " (" + outBytes.length + " bytes)");
         }
     }
 }

@@ -90,6 +90,8 @@ package yaku.uxntal;
 
 import java.util.*;
 
+
+
 public class Definitions {
     public enum TokenType {
         MAIN, LIT, INSTR, LABEL, REF, IREF, RAW, ADDR, PAD, LAMBDA, EMPTY,
@@ -125,7 +127,11 @@ public class Definitions {
         "BRK","LIT","INC","POP","NIP","SWP","ROT","DUP","OVR",
         "EQU","NEQ","GTH","LTH","JMP","JCN","JSR","STH",
         "LDZ","STZ","LDR","STR","LDA","STA","DEI","DEO",
-        "ADD","SUB","MUL","DIV","AND","ORA","EOR","SFT"
+        "ADD","SUB","MUL","DIV","AND","ORA","EOR","SFT",
+
+        "JSI","JCI","JMI"
+
+
     ));
 
     // Instruction name to opcode
@@ -135,13 +141,22 @@ public class Definitions {
             "BRK","INC","POP","NIP","SWP","ROT","DUP","OVR",
             "EQU","NEQ","GTH","LTH","JMP","JCN","JSR","STH",
             "LDZ","STZ","LDR","STR","LDA","STA","DEI","DEO",
-            "ADD","SUB","MUL","DIV","AND","ORA","EOR","SFT","LIT"
+            "ADD","SUB","MUL","DIV","AND","ORA","EOR","SFT","LIT",
+
+            "JSI","JCI","JMI"
+
         };
         int[] codes = {
             0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
             0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
             0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,
-            0x18,0x19,0x1A,0x1B,0x1C,0x1D,0x1E,0x1F,0x80
+            0x18,0x19,0x1A,0x1B,0x1C,0x1D,0x1E,0x1F,0x80,
+
+            0x2E,0x2D, // 新增，对应JSI和JCI
+
+            0x3C
+
+
         };
         for (int i=0; i<opcodes.length; ++i) {
             OPCODE_MAP.put(opcodes[i], codes[i]);
@@ -177,5 +192,10 @@ public class Definitions {
     }
     public static boolean isRefPrefix(String s) {
         return REF_TYPE_MAP.containsKey(s);
+    }
+
+    static {
+        System.out.println("JMI支持检测：" + OPCODE_MAP.get("JMI"));
+        // ...后面原有内容...
     }
 }
