@@ -41,7 +41,7 @@ for my $programFile (@programFiles) {
     next if $programFile=~/dbg/i;
         print $programFile, "\t";
     # open my $fh, '<', $programFile or die "Can't open file $!";
-    my @ref = `$yaku_command -W -r $programFile`;
+    my @ref = (); #`$yaku_command -W -r $programFile`;
     #`uxnasm $programFile tmp.rom && uxncli tmp.rom`;
     my $ref_str='';
     for my $refl (@ref) {

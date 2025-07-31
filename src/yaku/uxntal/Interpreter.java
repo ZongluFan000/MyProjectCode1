@@ -1,497 +1,228 @@
-// package yaku.uxntal;
-
-// import java.util.*;
-
-// import static yaku.uxntal.Definitions.*;
-
-// public class Interpreter {
-//     // 内存和两个栈
-//     private byte[] memory;
-//     private int pc; // 程序计数器
-//     private Deque<Integer> wst; // 工作栈
-//     private Deque<Integer> rst; // 返回栈
-//     private boolean running;
-
-//     // 构造方法，传入内存镜像（通常是 Encoder.encode 的结果）
-//     public Interpreter(byte[] memory, int entryPoint) {
-//         this.memory = memory;
-//         this.pc = entryPoint;
-//         this.wst = new ArrayDeque<>();
-//         this.rst = new ArrayDeque<>();
-//         this.running = true;
-//     }
-
-//     // 主解释循环
-//     public void run() {
-//         while (running && pc >= 0 && pc < memory.length) {
-//             int opcode = Byte.toUnsignedInt(memory[pc++]);
-//             // 解释一条指令
-//             step(opcode);
-//         }
-//     }
-
-//     // 单步执行
-//     private void step(int opcode) {
-//         switch (opcode) {
-//             case 0x00: // BRK
-//                 running = false;
-//                 System.out.println("[BRK] 程序终止");
-//                 break;
-//             case 0x01: // INC
-//                 wst.push(wst.pop() + 1);
-//                 break;
-//             case 0x02: // POP
-//                 wst.pop();
-//                 break;
-//             case 0x03: // NIP
-//                 int a3 = wst.pop(); wst.pop(); wst.push(a3);
-//                 break;
-//             case 0x04: // SWP
-//                 int a4 = wst.pop(), b4 = wst.pop(); wst.push(a4); wst.push(b4);
-//                 break;
-//             case 0x05: // ROT
-//                 int a5 = wst.pop(), b5 = wst.pop(), c5 = wst.pop();
-//                 wst.push(b5); wst.push(a5); wst.push(c5);
-//                 break;
-//             case 0x06: // DUP
-//                 wst.push(wst.peek());
-//                 break;
-//             case 0x07: // OVR
-//                 int a7 = wst.pop(), b7 = wst.peek(); wst.push(a7); wst.push(b7);
-//                 break;
-//             case 0x08: // EQU
-//                 int a8 = wst.pop(), b8 = wst.pop(); wst.push(a8 == b8 ? 1 : 0);
-//                 break;
-//             case 0x09: // NEQ
-//                 int a9 = wst.pop(), b9 = wst.pop(); wst.push(a9 != b9 ? 1 : 0);
-//                 break;
-//             case 0x0A: // GTH
-//                 int aA = wst.pop(), bA = wst.pop(); wst.push(bA > aA ? 1 : 0);
-//                 break;
-//             case 0x0B: // LTH
-//                 int aB = wst.pop(), bB = wst.pop(); wst.push(bB < aB ? 1 : 0);
-//                 break;
-//             case 0x0C: // JMP
-//                 pc = fetch16();
-//                 break;
-//             case 0x0D: // JCN
-//                 int cond = wst.pop();
-//                 int addr = fetch16();
-//                 if (cond != 0) pc = addr;
-//                 break;
-//             case 0x0E: // JSR
-//                 rst.push(pc + 2);
-//                 pc = fetch16();
-//                 break;
-//             case 0x0F: // STH
-//                 rst.push(wst.pop());
-//                 break;
-//             case 0x10: // LDZ
-//                 wst.push(Byte.toUnsignedInt(memory[wst.pop() & 0xFF]));
-//                 break;
-//             case 0x11: // STZ
-//                 memory[wst.pop() & 0xFF] = (byte) (int) wst.pop();
-//                 break;
-//             case 0x12: // LDR
-//                 wst.push(Byte.toUnsignedInt(memory[wst.pop() & 0xFFFF]));
-//                 break;
-//             case 0x13: // STR
-//                 memory[wst.pop() & 0xFFFF] = (byte) (int) wst.pop();
-//                 break;
-//             case 0x14: // LDA
-//                 int addr14 = wst.pop();
-//                 int val14 = (Byte.toUnsignedInt(memory[addr14 & 0xFFFF]) << 8) | Byte.toUnsignedInt(memory[(addr14 + 1) & 0xFFFF]);
-//                 wst.push(val14);
-//                 break;
-//             case 0x15: // STA
-//                 int addr15 = wst.pop();
-//                 int val15 = wst.pop();
-//                 memory[addr15 & 0xFFFF] = (byte) ((val15 >> 8) & 0xFF);
-//                 memory[(addr15 + 1) & 0xFFFF] = (byte) (val15 & 0xFF);
-//                 break;
-//             case 0x16: // DEI (设备输入，简化为0)
-//                 wst.push(0);
-//                 break;
-//             case 0x17: // DEO (设备输出，简化为控制台输出)
-//                 System.out.println("[DEO] 输出: " + wst.pop());
-//                 break;
-//             case 0x18: // ADD
-//                 int a18 = wst.pop(), b18 = wst.pop(); wst.push((a18 + b18) & 0xFFFF);
-//                 break;
-//             case 0x19: // SUB
-//                 int a19 = wst.pop(), b19 = wst.pop(); wst.push((b19 - a19) & 0xFFFF);
-//                 break;
-//             case 0x1A: // MUL
-//                 int a1A = wst.pop(), b1A = wst.pop(); wst.push((a1A * b1A) & 0xFFFF);
-//                 break;
-//             case 0x1B: // DIV
-//                 int a1B = wst.pop(), b1B = wst.pop();
-//                 wst.push(a1B == 0 ? 0 : (b1B / a1B));
-//                 break;
-//             case 0x1C: // AND
-//                 int a1C = wst.pop(), b1C = wst.pop(); wst.push(a1C & b1C);
-//                 break;
-//             case 0x1D: // ORA
-//                 int a1D = wst.pop(), b1D = wst.pop(); wst.push(a1D | b1D);
-//                 break;
-//             case 0x1E: // EOR
-//                 int a1E = wst.pop(), b1E = wst.pop(); wst.push(a1E ^ b1E);
-//                 break;
-//             case 0x1F: // SFT
-//                 int sft = wst.pop();
-//                 int v = wst.pop();
-//                 int r = (v >> (sft & 0x0F)) << ((sft >> 4) & 0x0F);
-//                 wst.push(r);
-//                 break;
-
-//             case 0x80: // LIT
-//             int literal = Byte.toUnsignedInt(memory[pc++]);
-//             wst.push(literal);
-//             break;
-            
-
-
-//             default:
-//                 System.err.printf("未知指令: 0x%02X，PC=0x%04X\n", opcode, pc - 1);
-//                 running = false;
-//         }
-//         printStack();
-//     }
-
-//     // 辅助方法：取内存中的16位数（大端）
-//     private int fetch16() {
-//         int hi = Byte.toUnsignedInt(memory[pc++]);
-//         int lo = Byte.toUnsignedInt(memory[pc++]);
-//         return (hi << 8) | lo;
-//     }
-
-//     // 打印当前两个栈的内容
-//     private void printStack() {
-//         System.out.print("[WST] ");
-//         System.out.println(wst);
-//         System.out.print("[RST] ");
-//         System.out.println(rst);
-//     }
-// }
-
-
-
 package yaku.uxntal;
 
 import java.util.*;
-import static yaku.uxntal.Definitions.*;
 
 public class Interpreter {
-    private byte[] memory;
-    private Map<Integer, String> reverseLabelTable;
-    private int pc; // 程序计数器
-    private int wordSize = 1;
-    private String currentParent = "MAIN";
-    private Deque<String> callStack = new ArrayDeque<>();
-    private List<Deque<StackValue>> stacks = Arrays.asList(
-            new ArrayDeque<>(), // work (0)
-            new ArrayDeque<>()  // return (1)
-    );
-    private boolean running = true;
+    public final byte[] memory;
+    public final Deque<StackElem> workStack = new ArrayDeque<>();
+    public final Deque<StackElem> returnStack = new ArrayDeque<>();
+    public int pc = 0;
 
-    // 栈元素结构（值+字节宽度）
-    static class StackValue {
-        int value;
-        int size; // 1=byte, 2=short
-        StackValue(int value, int size) {
-            this.value = value; this.size = size;
-        }
-        public String toString() {
-            return String.format("%s(%s)", value, size==1?"byte":"short");
+    // 栈元素结构
+    public static class StackElem {
+        public final short value;
+        public final int size; // 1 = byte, 2 = short
+        public StackElem(short value, int size) { this.value = value; this.size = size; }
+        @Override public String toString() {
+            return (size == 2) ? String.format("%04x", value & 0xFFFF) : String.format("%02x", value & 0xFF);
         }
     }
 
-    public Interpreter(byte[] memory, Map<Integer, String> reverseLabelTable) {
-        this.memory = memory;
-        this.reverseLabelTable = reverseLabelTable != null ? reverseLabelTable : new HashMap<>();
-        this.pc = 0x0100;
-        callStack.push("MAIN");
+    // Action 元信息
+    public static class Action {
+        public final String name;
+        public final int nArgs;
+        public final boolean hasResult;
+        public final boolean keepable;
+        public final ActionExec exec;
+        public Action(String name, int nArgs, boolean hasResult, boolean keepable, ActionExec exec) {
+            this.name = name; this.nArgs = nArgs; this.hasResult = hasResult; this.keepable = keepable; this.exec = exec;
+        }
+    }
+    @FunctionalInterface public interface ActionExec {
+        StackElem apply(StackElem[] args, int sz, int rs, int keep, Interpreter vm);
+    }
+
+    // 指令元信息表（补全全部指令）
+    public static final Map<String, Action> ACTION_TABLE = new HashMap<>();
+    static {
+        ACTION_TABLE.put("BRK", new Action("BRK", 0, false, false, Actions::brk));
+        ACTION_TABLE.put("INC", new Action("INC", 1, true, true, Actions::inc));
+        ACTION_TABLE.put("POP", new Action("POP", 1, false, true, Actions::pop));
+        ACTION_TABLE.put("NIP", new Action("NIP", 2, false, true, Actions::nip));
+        ACTION_TABLE.put("SWP", new Action("SWP", 2, false, true, Actions::swap));
+        ACTION_TABLE.put("ROT", new Action("ROT", 3, false, true, Actions::rot));
+        ACTION_TABLE.put("DUP", new Action("DUP", 1, false, true, Actions::dup));
+        ACTION_TABLE.put("OVR", new Action("OVR", 2, false, true, Actions::over));
+        ACTION_TABLE.put("EQU", new Action("EQU", 2, true, true, Actions::equ));
+        ACTION_TABLE.put("NEQ", new Action("NEQ", 2, true, true, Actions::neq));
+        ACTION_TABLE.put("GTH", new Action("GTH", 2, true, true, Actions::gth));
+        ACTION_TABLE.put("LTH", new Action("LTH", 2, true, true, Actions::lth));
+        ACTION_TABLE.put("JMP", new Action("JMP", 1, false, false, Actions::jmp));
+        ACTION_TABLE.put("JCN", new Action("JCN", 2, false, false, Actions::jcn));
+        ACTION_TABLE.put("JSR", new Action("JSR", 1, false, false, Actions::jsr));
+        ACTION_TABLE.put("STH", new Action("STH", 1, false, true, Actions::stash));
+        ACTION_TABLE.put("LDZ", new Action("LDZ", 1, true, true, Actions::ldz));
+        ACTION_TABLE.put("STZ", new Action("STZ", 2, false, true, Actions::stz));
+        ACTION_TABLE.put("LDR", new Action("LDR", 1, true, true, Actions::ldr));
+        ACTION_TABLE.put("STR", new Action("STR", 2, false, true, Actions::str));
+        ACTION_TABLE.put("LDA", new Action("LDA", 1, true, true, Actions::lda));
+        ACTION_TABLE.put("STA", new Action("STA", 2, false, true, Actions::sta));
+        ACTION_TABLE.put("DEI", new Action("DEI", 1, true, true, Actions::dei));
+        ACTION_TABLE.put("DEO", new Action("DEO", 2, false, true, Actions::deo));
+        ACTION_TABLE.put("ADD", new Action("ADD", 2, true, true, Actions::add));
+        ACTION_TABLE.put("SUB", new Action("SUB", 2, true, true, Actions::sub));
+        ACTION_TABLE.put("MUL", new Action("MUL", 2, true, true, Actions::mul));
+        ACTION_TABLE.put("DIV", new Action("DIV", 2, true, true, Actions::div));
+        ACTION_TABLE.put("AND", new Action("AND", 2, true, true, Actions::and));
+        ACTION_TABLE.put("ORA", new Action("ORA", 2, true, true, Actions::ora));
+        ACTION_TABLE.put("EOR", new Action("EOR", 2, true, true, Actions::eor));
+        ACTION_TABLE.put("SFT", new Action("SFT", 2, true, true, Actions::sft));
+        ACTION_TABLE.put("LIT", new Action("LIT", 0, false, false, Actions::lit));
+        // Immediate jumps if implemented
+        ACTION_TABLE.put("JMI", new Action("JMI", 0, false, false, Actions::jmi));
+        ACTION_TABLE.put("JSI", new Action("JSI", 0, false, false, Actions::jsi));
+        ACTION_TABLE.put("JCI", new Action("JCI", 1, false, false, Actions::jci));
+    }
+    
+
+    // 指令码→助记符表
+    public static final Map<Integer, String> OPCODE_MAP = new HashMap<>();
+    static {
+        OPCODE_MAP.put(0x00, "BRK");
+        OPCODE_MAP.put(0x08, "INC");
+        OPCODE_MAP.put(0x10, "POP");
+        OPCODE_MAP.put(0x18, "NIP");
+        OPCODE_MAP.put(0x20, "SWP");
+        OPCODE_MAP.put(0x28, "ROT");
+        OPCODE_MAP.put(0x30, "DUP");
+        OPCODE_MAP.put(0x38, "OVR");
+        OPCODE_MAP.put(0x40, "EQU");
+        OPCODE_MAP.put(0x48, "NEQ");
+        OPCODE_MAP.put(0x50, "GTH");
+        OPCODE_MAP.put(0x58, "LTH");
+        OPCODE_MAP.put(0x60, "JMP");
+        OPCODE_MAP.put(0x68, "JCN");
+        OPCODE_MAP.put(0x70, "JSR");
+        OPCODE_MAP.put(0x78, "STH");
+        OPCODE_MAP.put(0x80, "LDZ");
+        OPCODE_MAP.put(0x88, "STZ");
+        OPCODE_MAP.put(0x90, "LDR");
+        OPCODE_MAP.put(0x98, "STR");
+        OPCODE_MAP.put(0xA0, "LDA");
+        OPCODE_MAP.put(0xA8, "STA");
+        OPCODE_MAP.put(0xB0, "DEI");
+        OPCODE_MAP.put(0xB8, "DEO");
+        OPCODE_MAP.put(0xC0, "ADD");
+        OPCODE_MAP.put(0xC8, "SUB");
+        OPCODE_MAP.put(0xD0, "MUL");
+        OPCODE_MAP.put(0xD8, "DIV");
+        OPCODE_MAP.put(0xE0, "AND");
+        OPCODE_MAP.put(0xE8, "ORA");
+        OPCODE_MAP.put(0xF0, "EOR");
+        OPCODE_MAP.put(0xF8, "SFT");
+        OPCODE_MAP.put(0xFC, "LIT"); // LIT 高位也是 0xF8，但通常用 0x80，兼容写法
+        OPCODE_MAP.put(0x80, "LIT");
+        // Immediate family (非 Uxn 标准，但有的实现加了)
+        OPCODE_MAP.put(0xC0, "JMI");
+        OPCODE_MAP.put(0xC8, "JSI");
+        OPCODE_MAP.put(0xD0, "JCI");
+    }
+    
+
+    public Interpreter(byte[] memory) {
+        this.memory = Arrays.copyOf(memory, memory.length);
+        this.pc = 0x0100; // 默认入口
     }
 
     public void run() {
-        System.out.println("*** RUNNING ***");
-        while (running) {
-            if (pc < 0 || pc > 0xFFFF) throw new RuntimeException("Program counter out of bounds.");
-            Token token = fetchTokenFromMemory(pc);
+        try {
+            while (pc >= 0 && pc < memory.length) {
+                int opcode = memory[pc] & 0xFF;
+                int instr = opcode & 0xF8;
+                int sz = ((opcode & 0x04) != 0) ? 2 : 1;
+                int rs = ((opcode & 0x02) != 0) ? 1 : 0;
+                int keep = ((opcode & 0x01) != 0) ? 1 : 0;
 
-            // Parent/CallStack
-            if (token.type == TokenType.INSTR) {
-                String instr = token.value;
-                int sz = token.size;
-                int rs = token.stack;
+                String mnem = OPCODE_MAP.get(instr);
+                if (mnem == null) throw new RuntimeException("Unknown opcode: " + Integer.toHexString(instr) + " at pc=" + pc);
+                Action act = ACTION_TABLE.get(mnem);
+                if (act == null) throw new RuntimeException("Action not found: " + mnem + " at pc=" + pc);
 
-                if ("JSR".equals(instr) && sz == 2 && rs == 0) { // JSR2
-                    if (reverseLabelTable.containsKey(pc-3)) {
-                        currentParent = reverseLabelTable.get(pc-3);
-                        callStack.push(currentParent);
-                    } else {
-                        currentParent = "<lambda>";
-                        callStack.push(currentParent);
-                    }
+                Deque<StackElem> stack = (rs == 0 ? workStack : returnStack);
+                StackElem[] args = popArgs(stack, act.nArgs, sz, mnem, keep);
+
+                StackElem result = act.exec.apply(args, sz, rs, keep, this);
+
+                if (act.hasResult && result != null) {
+                    stack.addLast(new StackElem(result.value, sz));
                 }
-                else if ("JSI".equals(instr)) {
-                    if (reverseLabelTable.containsKey(pc+1)) {
-                        currentParent = reverseLabelTable.get(pc+1);
-                        callStack.push(currentParent);
-                    }
-                }
-                else if ("JMP".equals(instr) && sz == 2 && rs == 0) {
-                    if (reverseLabelTable.containsKey(pc-3)) {
-                        currentParent = reverseLabelTable.get(pc-3);
-                    }
-                }
-                else if ("JMI".equals(instr)) {
-                    if (reverseLabelTable.containsKey(pc+1)) {
-                        currentParent = reverseLabelTable.get(pc+1);
-                    }
-                }
-                // 弹出子例程
-                if ("JMP".equals(instr) && sz == 2 && rs == 1) {
-                    if (!callStack.isEmpty()) callStack.pop();
-                    currentParent = callStack.isEmpty() ? "MAIN" : callStack.peek();
-                }
+
+                if (!isJump(mnem)) pc += 1;
             }
-
-            //指令执行
-            executeInstr(token);
-
-            pc++;
+        } catch (Exception e) {
+            System.err.println("Error at pc=" + pc + ": " + e.getMessage());
+            showStacks();
+            throw e;
         }
     }
 
-    private Token fetchTokenFromMemory(int pc) {
-        int opcode = Byte.toUnsignedInt(memory[pc]);
-        // LIT 单独处理
-        if (opcode == 0x80) {
-            // 下一个字节即为常量（只支持单字节/简单LIT）
-            return new Token(TokenType.INSTR, "LIT", 1, 0, 0, pc);
-        }
-        // 指令
-        for (Map.Entry<String, Integer> entry : Definitions.OPCODE_MAP.entrySet()) {
-            if (entry.getValue() == opcode) {
-                return new Token(TokenType.INSTR, entry.getKey(), 1, 0, 0, pc);
+    // ==== 带类型参数弹出（完全兼容 Perl/JS pop_arg 行为） ====
+    private StackElem[] popArgs(Deque<StackElem> stack, int nArgs, int sz, String instr, int keep) {
+        if (nArgs == 0) return new StackElem[0];
+        if (stack.size() < nArgs)
+            throw new RuntimeException("Stack underflow at pc=" + pc + " for " + instr + " (need " + nArgs + ", have " + stack.size() + ")");
+        List<StackElem> argList = new ArrayList<>();
+        // 按原版顺序逆序收集
+        for (int i = 0; i < nArgs; i++) argList.add(0, stack.removeLast());
+        StackElem[] args = new StackElem[nArgs];
+        for (int i = 0; i < nArgs; i++) {
+            StackElem e = argList.get(i);
+            if (e.size == sz) {
+                args[i] = e;
+            } else if (e.size == 2 && sz == 1) {
+                System.err.println("[Warn] Type mismatch, short→byte for " + instr + " @pc=" + pc);
+                args[i] = new StackElem((short)(e.value & 0xFF), 1);
+            } else if (e.size == 1 && sz == 2) {
+                System.err.println("[Warn] Type mismatch, byte→short for " + instr + " @pc=" + pc);
+                if (i+1 < nArgs && argList.get(i+1).size == 1) {
+                    args[i] = new StackElem(
+                        (short)(((argList.get(i+1).value & 0xFF) << 8) | (e.value & 0xFF)), 2);
+                    i++;
+                } else {
+                    throw new RuntimeException("Stack type error: Need two byte for short at pc=" + pc);
+                }
+            } else {
+                throw new RuntimeException("Stack type error at pc=" + pc + ": want " + sz + " byte, got " + e.size);
             }
         }
-        return new Token(TokenType.UNKNOWN, Integer.toHexString(opcode), 1, pc);
+        return args;
     }
 
-    private void executeInstr(Token token) {
-        String instr = token.value;
-        int sz = token.size;
-        int rs = token.stack; // 工作栈 or 返回栈
-        int keep = token.keep;
-
-        // 0. LIT 指令
-        if ("LIT".equals(instr)) {
-            int literal = Byte.toUnsignedInt(memory[++pc]);
-            stackPush(0, literal, 1);
-            printStacks();
-            return;
-        }
-
-        // 1. 栈操作和简单指令
-        switch (instr) {
-            case "BRK":
-                running = false;
-                System.out.println("*** DONE ***");
-                showStacks();
-                return;
-            case "INC":
-                checkStack(0, 1); // 至少1元素
-                StackValue incv = stackPop(0);
-                stackPush(0, incv.value + 1, 1);
-                break;
-            case "POP":
-                checkStack(0, 1);
-                stackPop(0);
-                break;
-            case "NIP":
-                checkStack(0, 2);
-                StackValue nipA = stackPop(0), nipB = stackPop(0);
-                stackPush(0, nipA.value, nipA.size);
-                break;
-            case "SWP":
-                checkStack(0, 2);
-                StackValue swpA = stackPop(0), swpB = stackPop(0);
-                stackPush(0, swpA.value, swpA.size);
-                stackPush(0, swpB.value, swpB.size);
-                break;
-            case "ROT":
-                checkStack(0, 3);
-                StackValue rotA = stackPop(0), rotB = stackPop(0), rotC = stackPop(0);
-                stackPush(0, rotB.value, rotB.size);
-                stackPush(0, rotA.value, rotA.size);
-                stackPush(0, rotC.value, rotC.size);
-                break;
-            case "DUP":
-                checkStack(0, 1);
-                StackValue dup = stacks.get(0).peek();
-                stackPush(0, dup.value, dup.size);
-                break;
-            case "OVR":
-                checkStack(0, 2);
-                StackValue ovrA = stackPop(0), ovrB = stacks.get(0).peek();
-                stackPush(0, ovrA.value, ovrA.size);
-                stackPush(0, ovrB.value, ovrB.size);
-                break;
-            case "EQU":
-                checkStack(0, 2);
-                StackValue equA = stackPop(0), equB = stackPop(0);
-                stackPush(0, equA.value == equB.value ? 1 : 0, 1);
-                break;
-            case "NEQ":
-                checkStack(0, 2);
-                StackValue neqA = stackPop(0), neqB = stackPop(0);
-                stackPush(0, neqA.value != neqB.value ? 1 : 0, 1);
-                break;
-            case "GTH":
-                checkStack(0, 2);
-                StackValue gthA = stackPop(0), gthB = stackPop(0);
-                stackPush(0, gthB.value > gthA.value ? 1 : 0, 1);
-                break;
-            case "LTH":
-                checkStack(0, 2);
-                StackValue lthA = stackPop(0), lthB = stackPop(0);
-                stackPush(0, lthB.value < lthA.value ? 1 : 0, 1);
-                break;
-            case "JMP": // 跳转
-                int jmpAddr = fetch16(++pc); pc += 1; // fetch16自动向后读两字节
-                pc = jmpAddr - 1; // run()最后有pc++，所以-1
-                break;
-            case "JCN": // 条件跳转
-                checkStack(0, 1);
-                StackValue cond = stackPop(0);
-                int jcnAddr = fetch16(++pc); pc += 1;
-                if (cond.value != 0) pc = jcnAddr - 1;
-                break;
-            case "JSR": // 调用
-                int jsrAddr = fetch16(++pc); pc += 1;
-                stackPush(1, pc + 1, 2); // 返回地址入返回栈
-                pc = jsrAddr - 1;
-                break;
-            case "STH":
-                checkStack(0, 1);
-                StackValue sth = stackPop(0);
-                stackPush(1, sth.value, sth.size);
-                break;
-            case "LDZ":
-                checkStack(0, 1);
-                StackValue ldz = stackPop(0);
-                stackPush(0, Byte.toUnsignedInt(memory[ldz.value & 0xFF]), 1);
-                break;
-            case "STZ":
-                checkStack(0, 2);
-                StackValue stzVal = stackPop(0), stzAddr = stackPop(0);
-                memory[stzAddr.value & 0xFF] = (byte) (stzVal.value & 0xFF);
-                break;
-            case "LDR":
-                checkStack(0, 1);
-                StackValue ldr = stackPop(0);
-                stackPush(0, Byte.toUnsignedInt(memory[ldr.value & 0xFFFF]), 1);
-                break;
-            case "STR":
-                checkStack(0, 2);
-                StackValue strVal = stackPop(0), strAddr = stackPop(0);
-                memory[strAddr.value & 0xFFFF] = (byte) (strVal.value & 0xFF);
-                break;
-            case "LDA":
-                checkStack(0, 1);
-                StackValue lda = stackPop(0);
-                int hi = Byte.toUnsignedInt(memory[lda.value & 0xFFFF]);
-                int lo = Byte.toUnsignedInt(memory[(lda.value+1) & 0xFFFF]);
-                stackPush(0, (hi << 8) | lo, 2);
-                break;
-            case "STA":
-                checkStack(0, 2);
-                StackValue staVal = stackPop(0), staAddr = stackPop(0);
-                memory[staAddr.value & 0xFFFF] = (byte) ((staVal.value >> 8) & 0xFF);
-                memory[(staAddr.value+1) & 0xFFFF] = (byte) (staVal.value & 0xFF);
-                break;
-            case "DEI":
-                stackPush(0, 0, 1); // 简化为0
-                break;
-            case "DEO":
-                checkStack(0, 1);
-                StackValue deo = stackPop(0);
-                System.out.println("[DEO] 输出: " + deo.value);
-                break;
-            case "ADD":
-                checkStack(0, 2);
-                StackValue addA = stackPop(0), addB = stackPop(0);
-                stackPush(0, (addA.value + addB.value) & 0xFFFF, 2);
-                break;
-            case "SUB":
-                checkStack(0, 2);
-                StackValue subA = stackPop(0), subB = stackPop(0);
-                stackPush(0, (subB.value - subA.value) & 0xFFFF, 2);
-                break;
-            case "MUL":
-                checkStack(0, 2);
-                StackValue mulA = stackPop(0), mulB = stackPop(0);
-                stackPush(0, (mulA.value * mulB.value) & 0xFFFF, 2);
-                break;
-            case "DIV":
-                checkStack(0, 2);
-                StackValue divA = stackPop(0), divB = stackPop(0);
-                stackPush(0, divA.value == 0 ? 0 : (divB.value / divA.value), 2);
-                break;
-            case "AND":
-                checkStack(0, 2);
-                StackValue andA = stackPop(0), andB = stackPop(0);
-                stackPush(0, andA.value & andB.value, 2);
-                break;
-            case "ORA":
-                checkStack(0, 2);
-                StackValue oraA = stackPop(0), oraB = stackPop(0);
-                stackPush(0, oraA.value | oraB.value, 2);
-                break;
-            case "EOR":
-                checkStack(0, 2);
-                StackValue eorA = stackPop(0), eorB = stackPop(0);
-                stackPush(0, eorA.value ^ eorB.value, 2);
-                break;
-            case "SFT":
-                checkStack(0, 2);
-                StackValue sft = stackPop(0), v = stackPop(0);
-                int r = (v.value >> (sft.value & 0x0F)) << ((sft.value >> 4) & 0x0F);
-                stackPush(0, r, 2);
-                break;
-            default:
-                throw new RuntimeException("未知指令: " + instr + ", PC=" + pc);
-        }
-        printStacks();
+    private boolean isJump(String mnem) {
+        return mnem.equals("JMP") || mnem.equals("JSR") || mnem.equals("JCI") || mnem.equals("JMI") || mnem.equals("JSI");
     }
 
-    // 内存中的2字节高低位（大端序）
-    private int fetch16(int addr) {
-        int hi = Byte.toUnsignedInt(memory[addr]);
-        int lo = Byte.toUnsignedInt(memory[addr+1]);
-        return (hi << 8) | lo;
-    }
-
-    // 工作栈/返回栈操作
-    private void stackPush(int stackIndex, int value, int size) {
-        stacks.get(stackIndex).push(new StackValue(value, size));
-    }
-    private StackValue stackPop(int stackIndex) {
-        if (stacks.get(stackIndex).isEmpty()) throw new RuntimeException("Stack underflow");
-        return stacks.get(stackIndex).pop();
-    }
-    private void checkStack(int stackIndex, int n) {
-        if (stacks.get(stackIndex).size() < n)
-            throw new RuntimeException("Stack underflow: need " + n + ", have " + stacks.get(stackIndex).size());
-    }
     private void showStacks() {
-        System.out.println("Working Stack: " + stacks.get(0));
-        System.out.println("Return Stack : " + stacks.get(1));
+        System.err.println("WorkStack: " + stackToString(workStack));
+        System.err.println("ReturnStack: " + stackToString(returnStack));
     }
-    private void printStacks() {
-        System.out.print("[WST] "); System.out.println(stacks.get(0));
-        System.out.print("[RST] "); System.out.println(stacks.get(1));
+    private String stackToString(Deque<StackElem> stack) {
+        if (stack.isEmpty()) return "[]";
+        StringBuilder sb = new StringBuilder("[");
+        for (StackElem e : stack) sb.append(e).append(" ");
+        sb.append("]");
+        return sb.toString();
+    }
+
+    public Short loadMemory(int addr, int sz) {
+        if (addr < 0 || addr+sz > memory.length)
+            throw new RuntimeException("Memory access out of bounds: " + addr + " sz=" + sz);
+        if (sz == 1) return (short)(memory[addr] & 0xFF);
+        else return (short)(((memory[addr] & 0xFF) << 8) | (memory[addr+1] & 0xFF));
+    }
+    public void storeMemory(int addr, short value, int sz) {
+        if (addr < 0 || addr+sz > memory.length)
+            throw new RuntimeException("Memory write out of bounds: " + addr + " sz=" + sz);
+        if (sz == 1) memory[addr] = (byte)(value & 0xFF);
+        else {
+            memory[addr] = (byte)((value >> 8) & 0xFF);
+            memory[addr+1] = (byte)(value & 0xFF);
+        }
+    }
+
+    public void push(int rs, short value, int size) {
+        Deque<StackElem> st = (rs == 0 ? workStack : returnStack);
+        st.addLast(new StackElem(value, size));
     }
 }

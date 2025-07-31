@@ -132,22 +132,18 @@
 //     }
 // }
 
-
-
 package yaku.uxntal;
 
 import java.util.*;
-
 import yaku.uxntal.Definitions.TokenType;
-
 import static yaku.uxntal.Definitions.*;
 
 public class Encoder {
 
     public static class EncodeResult {
-        public byte[] memory;
-        public Map<String, Integer> labelTable;
-        public Map<Integer, String> reverseLabelTable; // Address->Tag Name
+        public final byte[] memory;
+        public final Map<String, Integer> labelTable;
+        public final Map<Integer, String> reverseLabelTable;
         public EncodeResult(byte[] memory, Map<String, Integer> labelTable, Map<Integer, String> reverseLabelTable) {
             this.memory = memory;
             this.labelTable = labelTable;
@@ -155,7 +151,6 @@ public class Encoder {
         }
     }
 
-    // For symbol tables and intermediate states
     private static class EncoderState {
         byte[] memory = new byte[MEMORY_SIZE];
         Map<String, Integer> labelTable = new HashMap<>();
@@ -168,61 +163,66 @@ public class Encoder {
     public EncodeResult encode(List<Token> tokens) {
         EncoderState state = new EncoderState();
 
-        // Write memory and build the symbol table
+        // 第一遍：写内存、收集标签和引用位置
         for (Token t : tokens) {
             switch (t.type) {
                 case MAIN:
                     state.pc = MAIN_ADDRESS;
                     break;
-
                 case ADDR:
                     state.pc = t.size;
                     break;
-
                 case PAD:
                     for (int i = 0; i < t.size; i++) {
                         if (state.pc < MEMORY_SIZE) state.memory[state.pc++] = 0;
                     }
                     break;
-
                 case LABEL:
-                    // Parent-child tag unification (child tags automatically complement the parent prefix)
                     String labelName = t.value;
-                    if (t.size == 2) { // parent
+                    if (t.size == 2) {
                         state.currentParentLabel = labelName;
-                    } else if (t.size == 1) { // child
+                    } else if (t.size == 1) {
                         labelName = state.currentParentLabel + "/" + labelName;
                     }
-                    if (state.labelTable.containsKey(labelName))
-                        throw new RuntimeException("重复定义标签Repeatedly defining labels: " + labelName + " at line " + t.line);
+                    if (state.labelTable.containsKey(labelName)) {
+                        throw new RuntimeException("重复定义标签: " + labelName + " at line " + t.line);
+                    }
                     state.labelTable.put(labelName, state.pc);
                     state.reverseLabelTable.put(state.pc, labelName);
                     break;
-
                 case REF:
                     String refName = t.value;
                     if (t.isChild == 1 && !refName.contains("/")) {
                         refName = state.currentParentLabel + "/" + refName;
                     }
-                    // Record all reference points
                     state.refTable.computeIfAbsent(refName, k -> new ArrayList<>()).add(state.pc);
-                    // Write the placeholder bytes first, the exact number of bytes will be handled later by resolveSymbols based on the refType and wordSz.
-                    int wordSz = (t.refType == 2 || t.refType == 5 || t.refType == 6) ? 2 : 1; 
+                    int wordSz = (t.refType == 2 || t.refType == 5 || t.refType == 6) ? 2 : 1;
                     for (int i = 0; i < wordSz; i++) {
                         if (state.pc < MEMORY_SIZE) state.memory[state.pc++] = 0;
                     }
                     break;
-
                 case INSTR:
-                    Integer opcode = Definitions.OPCODE_MAP.get(t.value.toUpperCase());
-                    if (opcode == null)
-                        throw new RuntimeException("未知指令unknown instruction: " + t.value + " at line " + t.line);
-                    if (state.pc < MEMORY_SIZE) state.memory[state.pc++] = opcode.byteValue();
+                    // 完整编码 opcode 包含高5位 + 低3位 (mode bits)
+                    Integer baseCode = OPCODE_MAP.get(t.value.toUpperCase());
+                    if (baseCode == null) {
+                        throw new RuntimeException("未知指令: " + t.value + " at line " + t.line);
+                    }
+                    int base = baseCode & 0xF8;  // 高5位
+                    // bit2=sz, bit1=rs(refType), bit0=keep(isChild)
+                    int mode = (t.size   == 2 ? 0x04 : 0)
+                             | (t.refType== 1 ? 0x02 : 0)
+                             | (t.isChild== 1 ? 0x01 : 0);
+                    byte finalOp = (byte)(base | mode);
+                    if (state.pc < MEMORY_SIZE) state.memory[state.pc++] = finalOp;
                     break;
-
                 case LIT:
-                    // LIT 
-                    if (state.pc < MEMORY_SIZE) state.memory[state.pc++] = (byte)0x80;
+                    // LIT 同样拼合模式位
+                    int litBase = 0x80; // LIT opcode base
+                    int litMode = (t.size   == 2 ? 0x04 : 0)
+                                | (t.refType== 1 ? 0x02 : 0)
+                                | (t.isChild== 1 ? 0x01 : 0);
+                    byte litOp = (byte)(litBase | litMode);
+                    if (state.pc < MEMORY_SIZE) state.memory[state.pc++] = litOp;
                     int num = Integer.parseInt(t.value, 16);
                     if (t.size == 2) {
                         if (state.pc + 1 < MEMORY_SIZE) {
@@ -233,7 +233,6 @@ public class Encoder {
                         if (state.pc < MEMORY_SIZE) state.memory[state.pc++] = (byte)(num & 0xFF);
                     }
                     break;
-
                 case RAW:
                     int rawNum = Integer.parseInt(t.value, 16);
                     if (t.size == 2) {
@@ -245,45 +244,37 @@ public class Encoder {
                         if (state.pc < MEMORY_SIZE) state.memory[state.pc++] = (byte)(rawNum & 0xFF);
                     }
                     break;
-
                 default:
-                
                     break;
             }
-            if (state.pc > MEMORY_SIZE)
-                throw new RuntimeException("超出内存容量Out of memory capacity！");
+            if (state.pc > MEMORY_SIZE) {
+                throw new RuntimeException("超出内存容量!");
+            }
         }
 
-        // resolveSymbols: secondary handling of all references (REF), distinguishing absolute/relative/immediate by refType.
+        // 第二遍：解析所有 REF，填充真实地址
         for (Map.Entry<String, List<Integer>> entry : state.refTable.entrySet()) {
-            String label = entry.getKey();
-            Integer addr = state.labelTable.get(label);
-            if (addr == null)
-                throw new RuntimeException("标签引用未定义Tag references are undefined: " + label);
-
+            String lbl = entry.getKey();
+            Integer addr = state.labelTable.get(lbl);
+            if (addr == null) {
+                throw new RuntimeException("标签引用未定义: " + lbl);
+            }
             for (int refPc : entry.getValue()) {
-                // find token
-                Token token = findTokenForRef(tokens, label, refPc);
-                if (token == null)
-                    throw new RuntimeException("Can't find REF's Token information，label=" + label + ", pc=" + refPc);
-
-                int wordSz = (token.refType == 2 || token.refType == 5 || token.refType == 6) ? 2 : 1;
+                Token tok = findTokenForRef(tokens, lbl, refPc);
+                if (tok == null) {
+                    throw new RuntimeException("找不到 REF Token 信息: " + lbl + " @ " + refPc);
+                }
+                int wSz = (tok.refType == 2 || tok.refType == 5 || tok.refType == 6) ? 2 : 1;
                 int val = addr;
-                // Immediate/
-                if (token.refType == 6) {
+                if (tok.refType == 6) {
                     val = addr - (refPc + 2);
-                    if (val > 32767 || val < -32768)
-                        throw new RuntimeException("相对地址过大Relative address too large: " + label);
                     if (val < 0) val = toTwosComplement16(val);
-                } else if (token.refType == 1 || token.refType == 4) { // 相对，1字节
+                } else if (tok.refType == 1 || tok.refType == 4) {
                     val = addr - (refPc + 2);
-                    if (val > 127 || val < -128)
-                        throw new RuntimeException("相对地址过大Relative address too large: " + label);
                     if (val < 0) val = toTwosComplement8(val);
                 }
-                // read memory
-                if (wordSz == 2) {
-                    state.memory[refPc] = (byte)((val >> 8) & 0xFF);
+                if (wSz == 2) {
+                    state.memory[refPc]     = (byte)((val >> 8) & 0xFF);
                     state.memory[refPc + 1] = (byte)(val & 0xFF);
                 } else {
                     state.memory[refPc] = (byte)(val & 0xFF);
@@ -291,30 +282,20 @@ public class Encoder {
             }
         }
 
-        // return 
         return new EncodeResult(state.memory, state.labelTable, state.reverseLabelTable);
     }
 
-    // Locate the original Token by label and pc
     private Token findTokenForRef(List<Token> tokens, String label, int pc) {
         for (Token t : tokens) {
-            if (t.type == TokenType.REF) {
-            
-                if ((t.value.equals(label) || (t.isChild == 1 && (label.endsWith("/" + t.value))))
-                    && t.line >= 0) { 
-                    return t;
-                }
+            if (t.type == TokenType.REF
+                && (t.value.equals(label)
+                    || (t.isChild == 1 && label.endsWith("/" + t.value)))) {
+                return t;
             }
         }
         return null;
     }
 
-    // negative number to complement (computing)
-    private int toTwosComplement8(int v) {
-        return v & 0xFF;
-    }
-    private int toTwosComplement16(int v) {
-        return v & 0xFFFF;
-    }
+    private int toTwosComplement8(int v)  { return v & 0xFF;   }
+    private int toTwosComplement16(int v) { return v & 0xFFFF; }
 }
-
