@@ -1,166 +1,200 @@
-// package yaku.uxntal;
+package yaku.uxntal;
+import yaku.uxntal.units.UxnState; 
+import java.nio.file.*;
+import java.io.*;
+import java.util.*;
 
-// import java.nio.file.Files;
-// import java.nio.file.Paths;
-// import java.util.List;
+public class Main {
 
-// public class Main {
-//     public static void main(String[] args) throws Exception {
-//         // 1. 读取 test.tal 文件
-//         String fileName = "test.tal"; // 确保和 Main.java 同一目录或传入完整路径
-//         String source = new String(Files.readAllBytes(Paths.get(fileName)), "UTF-8");
+    public static void main(String[] args) {
+        try {
+            // 1. 解析命令行参数
+            Map<String, Object> options = parseArgs(args);
+            if (Boolean.TRUE.equals(options.get("help"))) {
+                showHelp();
+                return;
+            }
 
-//         // 2. 解析
-//         Parser parser = new Parser();
-//         List<Token> tokens = parser.parse(source);
+            boolean useStdin = Boolean.TRUE.equals(options.get("stdin"));
+            String inputFile = useStdin ? null : (String) options.getOrDefault("inputFile", null);
 
-//         // 3. 打印解析结果
-//         for (Token t : tokens) {
-//             System.out.println(t);
-//         }
-//     }
-// }
+            if (!useStdin && inputFile == null) {
+                System.err.println("Error: Please provide the path to the .tal file");
+                System.exit(1);
+            }
 
+            String romFile = "from_stdin.rom";
+            if (inputFile != null) {
+                romFile = inputFile.replaceAll("\\.tal$", ".rom");
+                if (!Files.exists(Paths.get(inputFile))) {
+                    System.err.println("Error: File not found: " + inputFile);
+                    System.exit(1);
+                }
+            }
 
+            // 2. 设置 flags
+            Flags.setFlagsFromOptions(options);
 
+            // 3. 初始化 UxnState
+            int hasMain = Boolean.TRUE.equals(options.get("assume-main")) ? 2 : 0;
+            UxnState uxn = new UxnState(hasMain);
 
-// public class Main {
-//     public static void main(String[] args) throws Exception {
-//         // 1. 读取 test.tal 文件
-//         String fileName = "test.tal"; // 请确保和 Main.java 同目录或指定完整路径
-//         String source = new String(Files.readAllBytes(Paths.get(fileName)), "UTF-8");
+            // 4. 解析 .tal 源码为 tokens
+            List<Token> tokens;
+            List<int[]> lineIdxs;
+            if (useStdin) {
+                String input = new BufferedReader(new InputStreamReader(System.in)).lines()
+                        .reduce("", (a, b) -> a + "\n" + b);
+                Parser.ParseResult parseRes = Parser.parseText(input, "from_stdin.tal", uxn);
+                tokens = parseRes.tokens;
+                lineIdxs = parseRes.lineIdxs;   
+                uxn = parseRes.uxn;
+            } else {
+                Parser.ParseResult parseRes = Parser.parseProgram(inputFile, uxn);
+                tokens = parseRes.tokens;
+                lineIdxs = parseRes.lineIdxs;
+                uxn = parseRes.uxn;
+            }
 
-//         // 2. 词法分析 + 语法解析
-//         Parser parser = new Parser();
-//         List<Token> tokens = parser.parse(source);
+            // 5. 补全 token 下标
+            for (int i = 0; i < tokens.size(); i++) {
+                tokens.get(i).line = i;
+            }
 
-//         // 3. 编码到内存
-//         Encoder encoder = new Encoder();
-//         Encoder.EncodeResult result = encoder.encode(tokens);
+            // 6. 检查 MAIN token
+            if (uxn.hasMain == 2) {
+                Token mainTok = new Token(Definitions.TokenType.MAIN, "main", 0);
+                tokens.add(0, mainTok);
+            }
 
-//         // 4. 打印符号表
-//         System.out.println("符号表：");
-//         for (Map.Entry<String, Integer> entry : result.labelTable.entrySet()) {
-//             System.out.printf("  %-20s : 0x%04X\n", entry.getKey(), entry.getValue());
-//         }
+            // 7. 可选：错误检查
+            // if (!Flags.shouldShowFewerWarnings()) {
+            //     ErrorChecker.checkErrors(tokens, uxn);
+            // }
 
-//         // 5. 打印前 64 字节内存内容
-//         System.out.println("\n内存前64字节：");
-//         for (int i = 0; i < 64; i++) {
-//             System.out.printf("%02X ", result.memory[i]);
-//             if ((i+1) % 16 == 0) System.out.println();
-//         }
+            // 8. -p 只打印 token 并退出
+            if (Boolean.TRUE.equals(options.get("print-and-quit"))) {
+                PrettyPrint.prettyPrintTokens(tokens, true, 1);
+                return;
+            }
+            
+            // 9. 编码为内存（得到 byte[]）
+            Encoder.EncodeResult encodeResult = Encoder.encode(tokens);
+            byte[] byteMemory = encodeResult.memory;
 
-//         // 6. 可选：将内存写为 ROM 文件
-//         // Files.write(Paths.get("out.rom"), result.memory);
-//         int start = 0x0100;
-//         System.out.println("\n内存0x0100起64字节：");
-//         for (int i = start; i < start + 64; i++) {
-//             System.out.printf("%02X ", result.memory[i]);
-//             if ((i-start+1) % 16 == 0) System.out.println();
-//         }
-//     }
-// }
+            // 10. -r 运行解释器
+            if (Boolean.TRUE.equals(options.get("run"))) {
+                Interpreter vm = new Interpreter(byteMemory);
+                vm.run();
+                if (Boolean.TRUE.equals(options.get("show-stacks"))) {
+                    vm.showStacks();
+                }
+            }
 
+            // 11. -a 汇编 .rom
+            if (Boolean.TRUE.equals(options.get("assemble"))) {
+                RomWriter.memToRom(byteMemory, !Boolean.TRUE.equals(options.get("no-rom")), romFile);
+                System.out.println("ROM written: " + romFile);
+            }
 
-// package yaku.uxntal;
+        } catch (Exception e) {
+            System.err.println("Error: " + e.getMessage());
+            e.printStackTrace();
+            System.exit(1);
+        }
+    }
 
-// import java.nio.file.Files;
-// import java.nio.file.Paths;
-// import java.util.List;
+    /**
+     * 命令行参数解析，仿 JS 版 parseArgs 逻辑
+     */
+    public static Map<String, Object> parseArgs(String[] args) {
+        Map<String, Object> opts = new HashMap<>();
+        List<String> positionals = new ArrayList<>();
 
-// public class Main {
-//     public static void main(String[] args) throws Exception {
-//         // 1. 读取 test.tal 文件
-//         String fileName = "test.tal"; // 可放在项目根目录或指定绝对路径
-//         String source = new String(Files.readAllBytes(Paths.get(fileName)), "UTF-8");
+        for (int i = 0; i < args.length; i++) {
+            String arg = args[i];
+            switch (arg) {
+                case "-h":
+                case "--help":
+                    opts.put("help", true); break;
+                case "-r":
+                case "--run":
+                    opts.put("run", true); break;
+                case "-a":
+                case "--assemble":
+                    opts.put("assemble", true); break;
+                case "-D":
+                case "--no-rom":
+                    opts.put("no-rom", true); break;
+                case "-s":
+                case "--show-stacks":
+                    opts.put("show-stacks", true); break;
+                case "-p":
+                case "--print-and-quit":
+                    opts.put("print-and-quit", true); break;
+                case "-W":
+                case "--fewer-warnings":
+                    opts.put("fewer-warnings", true); break;
+                case "-S":
+                case "--no-stack-warnings":
+                    opts.put("no-stack-warnings", true); break;
+                case "-i":
+                case "--stdin":
+                    opts.put("stdin", true); break;
+                case "-m":
+                case "--assume-main":
+                    opts.put("assume-main", true); break;
+                case "-e":
+                case "--errors-from-warnings":
+                    opts.put("errors-from-warnings", true); break;
+                case "-f":
+                case "--fatal":
+                    opts.put("fatal", true); break;
+                case "-v":
+                case "--verbose":
+                    if (i + 1 < args.length) opts.put("verbose", args[++i]); break;
+                case "-d":
+                case "--debug":
+                    opts.put("debug", true); break;
+                default:
+                    if (arg.endsWith(".tal")) {
+                        opts.put("inputFile", arg);
+                    } else {
+                        positionals.add(arg);
+                    }
+            }
+        }
+        opts.put("positionals", positionals);
+        return opts;
+    }
 
-//         // 2. 词法+语法分析
-//         Parser parser = new Parser();
-//         List<Token> tokens = parser.parse(source);
-
-//         // 3. 汇编编码
-//         Encoder encoder = new Encoder();
-//         Encoder.EncodeResult encodeResult = encoder.encode(tokens);
-
-//         // 4. 运行虚拟机解释器
-//         Interpreter interpreter = new Interpreter(encodeResult.memory, encodeResult.reverseLabelTable);
-//         interpreter.run();
-//     }
-// }
-
-// public class Main {
-//     public static void main(String[] args) throws Exception {
-//         // 1. 读取 test.tal 文件
-//         String fileName = "test.tal";
-//         String source = new String(Files.readAllBytes(Paths.get(fileName)), "UTF-8");
-
-//         // 2. 解析成 Token
-//         Parser parser = new Parser();
-//         List<Token> tokens = parser.parse(source);
-
-//         // 3. 语义/分配/寻址错误检查
-//         ErrorChecker checker = new ErrorChecker();
-//         try {
-//             checker.check(tokens);
-//             System.out.println("通过 ErrorChecker 检查，无严重错误。");
-//         } catch (RuntimeException e) {
-//             System.err.println("检测到错误，编译中止：" + e.getMessage());
-//             return;
-//         }
-
-//         // 4. 编码与解释执行（如无错误才继续）
-//         Encoder encoder = new Encoder();
-//         Encoder.EncodeResult encodeResult = encoder.encode(tokens);
-
-//         Interpreter interpreter = new Interpreter(encodeResult.memory, encodeResult.reverseLabelTable);
-//         interpreter.run();
-//     }
-// }
-
-// public class Main {
-//     public static void main(String[] args) throws Exception {
-//         // 1. 读取 test.tal 文件
-//         String fileName = "test.tal";
-//         String source = new String(Files.readAllBytes(Paths.get(fileName)), "UTF-8");
-
-//         // 2. 词法/语法分析为 token 列表
-//         Parser parser = new Parser();
-//         List<Token> tokens = parser.parse(source);
-
-//         // 3. 用 PrettyPrinter 美化并打印 token 序列
-//         System.out.println("====== Pretty Print ======");
-//         PrettyPrint.prettyPrint(tokens, false);
-
-//         // 4. 还可以获取字符串，用于保存到文件
-//         String prettySource = PrettyPrint.prettyPrintStr(tokens, false);
-//         //Files.write(Paths.get("pretty_test.tal"), prettySource.getBytes("UTF-8"));
-//     }
-// }
-
-
-// public class Main {
-//     public static void main(String[] args) throws Exception {
-//         // 1. 读取 test.tal 文件
-//         String fileName = "test.tal";
-//         String source = new String(Files.readAllBytes(Paths.get(fileName)), "UTF-8");
-
-//         // 2. 解析为 token 列表
-//         Parser parser = new Parser();
-//         List<Token> tokens = parser.parse(source);
-
-//         // 3. 编码为虚拟机内存
-//         Encoder encoder = new Encoder();
-//         Encoder.EncodeResult encodeResult = encoder.encode(tokens);
-
-//         // 4. 用 Assembler 精确导出 ROM（只保留有效区间，不带多余0）
-//         int startAddr = 0x0100; // uxntal 程序入口一般从0x0100开始
-//         String romFile = "out.rom";
-//         boolean writeRom = true;
-//         boolean verbose = true; // 打印导出ROM的内容
-
-//         Assembler.memToRom(encodeResult.memory, startAddr, writeRom, romFile, verbose);
-
-//         System.out.println("Assembler 测试完成！");
-//     }
-// }
+    /**
+     * 帮助信息
+     */
+    public static void showHelp() {
+        System.out.println(
+                "Yaku-Java - Uxntal assembler and interpreter\n" +
+                        "\nUsage: java -jar yaku.jar [options] <.tal file>\n" +
+                        "\nOptions:\n" +
+                        "  -h, --help                    Show this help message\n" +
+                        "  -r, --run                     Run the program\n" +
+                        "  -a, --assemble                Assemble the program into a .rom file\n" +
+                        "  -D, --no-rom                  Don't write .rom file (for test/debug)\n" +
+                        "  -s, --show-stacks             Show the stacks at the end of the run\n" +
+                        "  -p, --print-and-quit          Print generated code and exit\n" +
+                        "  -W, --fewer-warnings          Fewer warning and error messages\n" +
+                        "  -S, --no-stack-warnings       No warnings for byte/short mismatch on stack manipulation instructions\n" +
+                        "  -i, --stdin                   Take input from stdin instead of a file\n" +
+                        "  -m, --assume-main             Assume a 'main' |0100 at the start of the program\n" +
+                        "  -e, --errors-from-warnings    Turn all warnings into errors\n" +
+                        "  -f, --fatal                   Fatal mode - die on the first error\n" +
+                        "  -v, --verbose <level>         Verbosity level (0-3)\n" +
+                        "  -d, --debug                   Enable debug mode\n" +
+                        "\nExamples:\n" +
+                        "  java -jar yaku.jar -r hello.tal             Run hello.tal\n" +
+                        "  java -jar yaku.jar -a hello.tal             Assemble hello.tal to hello.rom\n" +
+                        "  java -jar yaku.jar -p hello.tal             Print generated code for hello.tal\n" +
+                        "  echo \"#42 #18 DEO BRK\" | java -jar yaku.jar -i -r    Run code from stdin\n"
+        );
+    }
+}

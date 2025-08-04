@@ -1,0 +1,17 @@
+|0100 ( Program starts at address 256 )
+
+#48 #18 DEO ( Print 'H' )
+#65 #18 DEO ( Print 'e' )
+#6c #18 DEO ( Print 'l' )
+#6c #18 DEO ( Print 'l' )
+#6f #18 DEO ( Print 'o' )
+#20 #18 DEO ( Print ' ' )
+#57 #18 DEO ( Print 'W' )
+#6f #18 DEO ( Print 'o' )
+#72 #18 DEO ( Print 'r' )
+#6c #18 DEO ( Print 'l' )
+#64 #18 DEO ( Print 'd' )
+#21 #18 DEO ( Print '!' )
+#0a #18 DEO ( Print newline )
+
+BRK ( Halt the program )

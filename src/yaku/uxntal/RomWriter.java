@@ -1,17 +1,28 @@
-// package yaku.uxntal;
+package yaku.uxntal;
 
-// import java.io.IOException;
-// import java.nio.file.Files;
-// import java.nio.file.Paths;
+import java.io.FileOutputStream;
+import java.io.IOException;
 
-// public class RomWriter {
-//     /**
-//      * 将内存数据写成二进制 ROM 文件
-//      * @param memory   汇编得到的虚拟机内存（64K 字节）
-//      * @param filename 输出文件名（如 "out.rom"）
-//      * @throws IOException 写文件异常
-//      */
-//     public static void write(byte[] memory, String filename) throws IOException {
-//         Files.write(Paths.get(filename), memory);
-//     }
-// }
+/**
+ * ROM Writer: 将内存内容导出为 .rom 文件（适用于 Uxn 虚拟机或硬件烧录）
+ */
+public class RomWriter {
+
+    /**
+     * 将 byte[] 内存内容写入 .rom 文件
+     * @param memory    内存数据，通常是 Encoder.encode() 得到的 byte[]
+     * @param writeFile 是否实际写入文件（false 则仅调试打印提示）
+     * @param filename  输出文件名
+     * @throws IOException 文件写入异常
+     */
+    public static void memToRom(byte[] memory, boolean writeFile, String filename) throws IOException {
+        if (!writeFile) {
+            System.out.println("[RomWriter] 测试模式：未写入 ROM 文件 (" + filename + ")");
+            return;
+        }
+        try (FileOutputStream fos = new FileOutputStream(filename)) {
+            fos.write(memory);
+            System.out.println("[RomWriter] ROM 文件已写入：" + filename + "，大小 " + memory.length + " 字节");
+        }
+    }
+}
