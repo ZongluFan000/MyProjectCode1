@@ -5,10 +5,7 @@ import java.nio.file.Paths;
 import java.util.*;
 import yaku.uxntal.units.UxnState;
 
-/**
- * 综合 parser，兼容 JS 版 parser.js、lexer.js、include-handler.js
- * 全静态方法，无成员变量！
- */
+
 public class Parser {
     /** 结果数据结构 */
     public static class ParseResult {
@@ -21,6 +18,9 @@ public class Parser {
             this.uxn = uxn;
         }
     }
+
+
+
 
     // ------------- 主入口 -------------
     /** 解析 .tal 源文件（全静态，无成员变量） */
@@ -49,35 +49,68 @@ public class Parser {
     }
 
     // ------------ 词法分析核心 ------------
+    // private static void tokenize(String sourceText, String filename, List<LexerToken> tokens, List<int[]> lineMapping) {
+    //     String cleanText = sourceText.replace("\r\n", "\n").replace("\r", "\n");
+    //     String[] lines = cleanText.split("\n");
+    //     int lineNum = 1;
+    //     for (String line : lines) {
+    //         for (String mark : line.trim().split("\\s+")) {
+    //             if (mark.isEmpty()) continue;
+    //             LexerToken lt = parseMark(mark, lineNum, filename);
+    //             if (lt != null) {
+    //                 tokens.add(lt);
+    //                 lineMapping.add(new int[]{lineNum, filename.hashCode()}); // 可扩展为文件映射
+    //             }
+    //         }
+    //         lineNum++;
+    //     }
+    // }
+
+
     private static void tokenize(String sourceText, String filename, List<LexerToken> tokens, List<int[]> lineMapping) {
         String cleanText = sourceText.replace("\r\n", "\n").replace("\r", "\n");
         String[] lines = cleanText.split("\n");
         int lineNum = 1;
         for (String line : lines) {
-            for (String mark : line.trim().split("\\s+")) {
+            StringBuilder noComment = new StringBuilder();
+            int depth = 0;
+            for (int i = 0; i < line.length(); i++) {
+                char c = line.charAt(i);
+                if (c == '(') {
+                    depth++;
+                } else if (c == ')') {
+                    if (depth > 0) depth--;
+                } else {
+                    if (depth == 0) noComment.append(c);
+                }
+            }
+            for (String mark : noComment.toString().trim().split("\\s+")) {
                 if (mark.isEmpty()) continue;
                 LexerToken lt = parseMark(mark, lineNum, filename);
                 if (lt != null) {
                     tokens.add(lt);
-                    lineMapping.add(new int[]{lineNum, filename.hashCode()}); // 可扩展为文件映射
+                    lineMapping.add(new int[]{lineNum, filename.hashCode()});
                 }
             }
             lineNum++;
         }
     }
+    
+
 
     // ----------- 单个 token 解析，兼容 JS 版 lexer -----------
     private static LexerToken parseMark(String mark, int lineNum, String filename) {
-        if (mark.startsWith("~")) return new LexerToken(Definitions.TokenType.INCLUDE, mark.substring(1), lineNum, filename);
-        if (mark.startsWith("%")) throw new RuntimeException("Macros not yet supported at line " + lineNum);
-        if (mark.startsWith("\"") && mark.length() > 1) {
-            return new LexerToken(Definitions.TokenType.STR, mark.substring(1), lineNum, filename);
-        }
         if (mark.startsWith("#")) {
             String hexStr = mark.substring(1);
             if (!hexStr.matches("[0-9a-fA-F]{2}|[0-9a-fA-F]{4}"))
                 throw new RuntimeException("Constant #" + hexStr + " must be two or four hex digits at line " + lineNum);
-            return new LexerToken(Definitions.TokenType.LIT, hexStr, lineNum, filename);
+            int sz = hexStr.length() == 4 ? 2 : 1;   // 关键
+            return new LexerToken(Definitions.TokenType.LIT, hexStr, sz, lineNum, filename);
+        }
+        if (mark.startsWith("~")) return new LexerToken(Definitions.TokenType.INCLUDE, mark.substring(1), lineNum, filename);
+        if (mark.startsWith("%")) throw new RuntimeException("Macros not yet supported at line " + lineNum);
+        if (mark.startsWith("\"") && mark.length() > 1) {
+            return new LexerToken(Definitions.TokenType.STR, mark.substring(1), lineNum, filename);
         }
         if (mark.matches("^[;,.\\._\\-=].+")) {
             String prefix = mark.substring(0,1);
@@ -110,6 +143,7 @@ public class Parser {
             return new LexerToken(Definitions.TokenType.RAW, mark, (mark.length()==2)?1:2, lineNum, filename);
         return new LexerToken(Definitions.TokenType.UNKNOWN, mark, lineNum, filename);
     }
+    
 
     // ------- Include处理（递归，静态） ----------
     private static List<LexerToken> processIncludes(List<LexerToken> tokens, String baseDir, Set<String> includedFiles) throws Exception {
@@ -223,3 +257,6 @@ public class Parser {
         }
     }
 }
+
+
+

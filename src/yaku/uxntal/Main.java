@@ -6,8 +6,19 @@ import java.util.*;
 
 public class Main {
 
+
+
+
+
     public static void main(String[] args) {
         try {
+
+////////////////////////////////////////////
+System.out.println(Definitions.OPCODE_MAP) ;
+System.out.println("当前OPCODE_MAP：" + yaku.uxntal.Definitions.OPCODE_MAP);
+
+
+
             // 1. 解析命令行参数
             Map<String, Object> options = parseArgs(args);
             if (Boolean.TRUE.equals(options.get("help"))) {
@@ -66,6 +77,35 @@ public class Main {
                 Token mainTok = new Token(Definitions.TokenType.MAIN, "main", 0);
                 tokens.add(0, mainTok);
             }
+
+
+         
+
+        //    List<Token> tokens;
+        //    List<int[]> lineIdxs;
+           if (useStdin) {
+               String input = new BufferedReader(new InputStreamReader(System.in)).lines()
+                       .reduce("", (a, b) -> a + "\n" + b);
+               Parser.ParseResult parseRes = Parser.parseText(input, "from_stdin.tal", uxn);
+               tokens = parseRes.tokens;
+               lineIdxs = parseRes.lineIdxs;   
+               uxn = parseRes.uxn;
+           } else {
+               Parser.ParseResult parseRes = Parser.parseProgram(inputFile, uxn);
+               tokens = parseRes.tokens;
+               lineIdxs = parseRes.lineIdxs;
+               uxn = parseRes.uxn;
+           }
+
+/////////////////////////////////////////////////////////////////////////////////
+           System.out.println("==== TOKENS DUMP ====");
+           for (Token t : tokens) {
+               System.out.println(t);
+           }
+           System.out.println("=====================");
+
+           // ...原流程继续...
+
 
             // 7. 可选：错误检查
             // if (!Flags.shouldShowFewerWarnings()) {

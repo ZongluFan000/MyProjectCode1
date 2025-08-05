@@ -22,44 +22,53 @@ public class Actions {
     // 助记符映射
     public static final Map<Integer, String> OPCODE_MAP = new HashMap<>();
     static {
-        OPCODE_MAP.put(0x00, "BRK");
-        OPCODE_MAP.put(0x08, "INC");
-        OPCODE_MAP.put(0x10, "POP");
-        OPCODE_MAP.put(0x18, "NIP");
-        OPCODE_MAP.put(0x20, "SWP");
-        OPCODE_MAP.put(0x28, "ROT");
-        OPCODE_MAP.put(0x30, "DUP");
-        OPCODE_MAP.put(0x38, "OVR");
-        OPCODE_MAP.put(0x40, "EQU");
-        OPCODE_MAP.put(0x48, "NEQ");
-        OPCODE_MAP.put(0x50, "GTH");
-        OPCODE_MAP.put(0x58, "LTH");
-        OPCODE_MAP.put(0x60, "JMP");
-        OPCODE_MAP.put(0x68, "JCN");
-        OPCODE_MAP.put(0x70, "JSR");
-        OPCODE_MAP.put(0x78, "STH");
-        OPCODE_MAP.put(0x80, "LDZ");
-        OPCODE_MAP.put(0x88, "STZ");
-        OPCODE_MAP.put(0x90, "LDR");
-        OPCODE_MAP.put(0x98, "STR");
-        OPCODE_MAP.put(0xA0, "LDA");
-        OPCODE_MAP.put(0xA8, "STA");
-        OPCODE_MAP.put(0xB0, "DEI");
-        OPCODE_MAP.put(0xB8, "DEO");
-        OPCODE_MAP.put(0xC0, "ADD");
-        OPCODE_MAP.put(0xC8, "SUB");
-        OPCODE_MAP.put(0xD0, "MUL");
-        OPCODE_MAP.put(0xD8, "DIV");
-        OPCODE_MAP.put(0xE0, "AND");
-        OPCODE_MAP.put(0xE8, "ORA");
-        OPCODE_MAP.put(0xF0, "EOR");
-        OPCODE_MAP.put(0xF8, "SFT");
-        OPCODE_MAP.put(0xFC, "LIT");
-        OPCODE_MAP.put(0x80, "LIT"); // 兼容
-        // Immediate variants（如有需要可扩展）
-        OPCODE_MAP.put(0xC0, "JMI");
-        OPCODE_MAP.put(0xC8, "JSI");
-        OPCODE_MAP.put(0xD0, "JCI");
+// Stack
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x00 + i, "BRK");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x08 + i, "INC");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x10 + i, "POP");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x18 + i, "NIP");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x20 + i, "SWP");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x28 + i, "ROT");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x30 + i, "DUP");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x38 + i, "OVR");
+
+        // Logic
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x40 + i, "EQU");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x48 + i, "NEQ");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x50 + i, "GTH");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x58 + i, "LTH");
+
+        // Flow
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x60 + i, "JMP");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x68 + i, "JCN");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x70 + i, "JSR");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x78 + i, "STH");
+
+        // Memory
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x80 + i, "LDZ");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x88 + i, "STZ");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x90 + i, "LDR");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x98 + i, "STR");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0xA0 + i, "LDA");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0xA8 + i, "STA");
+
+        // Devices
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0xB0 + i, "DEI");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0xB8 + i, "DEO");
+
+        // Math
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0xC0 + i, "ADD");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0xC8 + i, "SUB");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0xD0 + i, "MUL");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0xD8 + i, "DIV");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0xE0 + i, "AND");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0xE8 + i, "ORA");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0xF0 + i, "EOR");
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0xF8 + i, "SFT");
+
+        // LIT (literal, special)
+        for (int i = 0; i < 8; i++) OPCODE_MAP.put(0x80 + i, "LIT"); // 标准
+
     }
 
     // 指令元信息表
@@ -102,6 +111,9 @@ public class Actions {
         ACTION_TABLE.put("JMI", new Action("JMI", 0, false, false, Actions::jmi));
         ACTION_TABLE.put("JSI", new Action("JSI", 0, false, false, Actions::jsi));
         ACTION_TABLE.put("JCI", new Action("JCI", 1, false, false, Actions::jci));
+
+
+
     }
 
     // ==== 指令实现 ====
@@ -228,23 +240,40 @@ public class Actions {
         System.err.println("[Warn] DEI port not implemented: " + port + " at pc=" + uxn.pc);
         return new Interpreter.StackElem((short) 0, 1);
     }
+
+
     public static Interpreter.StackElem deo(Interpreter.StackElem[] args, int sz, int rs, int keep, Interpreter uxn) {
-        int port = args[0].value & 0xFF, val = args[1].value & 0xFF;
-        if (port == 0x18) System.out.print((char) val);
-        else if (port == 0x0F && val != 0) System.exit(val & 0x7F);
-        return null;
+        
+        int val  = args[0].value & ((sz == 2) ? 0xFFFF : 0xFF);
+        int port = args[1].value & 0xFF;
+        // 实际DEO行为实现（视你的模拟器架构）
+        // 这里通常会调用 uxn.storeMemory(port, val, sz);
+        System.out.printf("DEO CALLED port=%02x val=%04x sz=%d\n", port, val, sz);
+        return null; // DEO 没有返回
+        
+        
+
     }
+    
+    
+    
     public static Interpreter.StackElem add(Interpreter.StackElem[] args, int sz, int rs, int keep, Interpreter uxn) {
-        int res = args[1].value + args[0].value;
-        return new Interpreter.StackElem((short) ((sz == 1) ? (res & 0xFF) : (res & 0xFFFF)), sz);
+        int a = args[0].value;
+        int b = args[1].value;
+        int res = (sz == 2) ? ((a & 0xFFFF) + (b & 0xFFFF)) : ((a & 0xFF) + (b & 0xFF));
+        return new Interpreter.StackElem(res & ((sz == 2) ? 0xFFFF : 0xFF), sz);
+        
     }
     public static Interpreter.StackElem sub(Interpreter.StackElem[] args, int sz, int rs, int keep, Interpreter uxn) {
         int res = args[1].value - args[0].value;
         return new Interpreter.StackElem((short) ((sz == 1) ? (res & 0xFF) : (res & 0xFFFF)), sz);
     }
     public static Interpreter.StackElem mul(Interpreter.StackElem[] args, int sz, int rs, int keep, Interpreter uxn) {
-        int res = args[1].value * args[0].value;
-        return new Interpreter.StackElem((short) ((sz == 1) ? (res & 0xFF) : (res & 0xFFFF)), sz);
+        int a = args[0].value;
+        int b = args[1].value;
+        int res = (sz == 2) ? ((a & 0xFFFF) * (b & 0xFFFF)) : ((a & 0xFF) * (b & 0xFF));
+        return new Interpreter.StackElem(res & ((sz == 2) ? 0xFFFF : 0xFF), sz);
+        
     }
     public static Interpreter.StackElem div(Interpreter.StackElem[] args, int sz, int rs, int keep, Interpreter uxn) {
         if (args[0].value == 0) throw new ArithmeticException("Divide by zero");
@@ -298,4 +327,10 @@ public class Actions {
         }
         return null;
     }
+
+   
+
 }
+
+
+

@@ -35,7 +35,7 @@ public class UxnState {
     public int free = 0;
 
     // lambda支持
-    public Stack<Object> lambdaStack = new Stack<>();
+    public Stack<Integer> lambdaStack = new Stack<>();
     public int lambdaCount = 0;
 
     // 主程序flag
