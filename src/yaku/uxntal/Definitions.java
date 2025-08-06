@@ -38,46 +38,70 @@
         public static final Map<String, Integer> OPCODE_MAP = new HashMap<>();
         static {
             OPCODE_MAP.put("BRK", 0x00);
-            OPCODE_MAP.put("LIT", 0x80);    // 8位
-            OPCODE_MAP.put("LIT2", 0xa0);   // 16位
-        
-            OPCODE_MAP.put("ADD", 0x18);    OPCODE_MAP.put("ADD2", 0x38);
-            OPCODE_MAP.put("SUB", 0x19);    OPCODE_MAP.put("SUB2", 0x39);
-            OPCODE_MAP.put("MUL", 0x1a);    OPCODE_MAP.put("MUL2", 0x3a);
-            OPCODE_MAP.put("DIV", 0x1b);    OPCODE_MAP.put("DIV2", 0x3b);
-            OPCODE_MAP.put("AND", 0x1c);    OPCODE_MAP.put("AND2", 0x3c);
-            OPCODE_MAP.put("ORA", 0x1d);    OPCODE_MAP.put("ORA2", 0x3d);
-            OPCODE_MAP.put("EOR", 0x1e);    OPCODE_MAP.put("EOR2", 0x3e);
-            OPCODE_MAP.put("SFT", 0x1f);    OPCODE_MAP.put("SFT2", 0x3f);
-        
-            OPCODE_MAP.put("DEO", 0x17);    OPCODE_MAP.put("DEO2", 0x37);
-            OPCODE_MAP.put("DEI", 0x16);    OPCODE_MAP.put("DEI2", 0x36);
-        
-            OPCODE_MAP.put("STZ", 0x13);    OPCODE_MAP.put("STZ2", 0x33);
-            OPCODE_MAP.put("LDZ", 0x12);    OPCODE_MAP.put("LDZ2", 0x32);
-            OPCODE_MAP.put("STA", 0x15);    OPCODE_MAP.put("STA2", 0x35);
-            OPCODE_MAP.put("LDA", 0x14);    OPCODE_MAP.put("LDA2", 0x34);
-        
-            OPCODE_MAP.put("STH", 0x07);    OPCODE_MAP.put("STH2", 0x27);
-            OPCODE_MAP.put("STR", 0x05);    OPCODE_MAP.put("STR2", 0x25);
-            OPCODE_MAP.put("LDR", 0x04);    OPCODE_MAP.put("LDR2", 0x24);
-        
-            OPCODE_MAP.put("POP", 0x02);    OPCODE_MAP.put("POP2", 0x22);
-            OPCODE_MAP.put("DUP", 0x03);    OPCODE_MAP.put("DUP2", 0x23);
-            OPCODE_MAP.put("SWP", 0x01);    OPCODE_MAP.put("SWP2", 0x21);
-            OPCODE_MAP.put("OVR", 0x09);    OPCODE_MAP.put("OVR2", 0x29);
-            OPCODE_MAP.put("ROT", 0x0a);    OPCODE_MAP.put("ROT2", 0x2a);
-        
-            OPCODE_MAP.put("EQU", 0x08);    OPCODE_MAP.put("EQU2", 0x28);
-            OPCODE_MAP.put("NEQ", 0x09);    OPCODE_MAP.put("NEQ2", 0x29);
-            OPCODE_MAP.put("GTH", 0x0a);    OPCODE_MAP.put("GTH2", 0x2a);
-            OPCODE_MAP.put("LTH", 0x0b);    OPCODE_MAP.put("LTH2", 0x2b);
-        
-            OPCODE_MAP.put("JMP", 0x0c);    OPCODE_MAP.put("JMP2", 0x2c);
-            OPCODE_MAP.put("JCN", 0x0d);    OPCODE_MAP.put("JCN2", 0x2d);
-            OPCODE_MAP.put("JSR", 0x0e);    OPCODE_MAP.put("JSR2", 0x2e);
-            // ...如有遗漏，按 JS 版一一补全
-
+            OPCODE_MAP.put("LIT", 0x80);
+            OPCODE_MAP.put("LIT2", 0xa0);
+            OPCODE_MAP.put("ADD", 0x18);
+            OPCODE_MAP.put("ADD2", 0x38);
+            OPCODE_MAP.put("SUB", 0x19);
+            OPCODE_MAP.put("SUB2", 0x39);
+            OPCODE_MAP.put("MUL", 0x1a);
+            OPCODE_MAP.put("MUL2", 0x3a);
+            OPCODE_MAP.put("DIV", 0x1b);
+            OPCODE_MAP.put("DIV2", 0x3b);
+            OPCODE_MAP.put("AND", 0x1c);
+            OPCODE_MAP.put("AND2", 0x3c);
+            OPCODE_MAP.put("ORA", 0x1d);
+            OPCODE_MAP.put("ORA2", 0x3d);
+            OPCODE_MAP.put("EOR", 0x1e);
+            OPCODE_MAP.put("EOR2", 0x3e);
+            OPCODE_MAP.put("SFT", 0x1f);
+            OPCODE_MAP.put("SFT2", 0x3f);
+            OPCODE_MAP.put("DEO", 0x17);
+            OPCODE_MAP.put("DEO2", 0x37);
+            OPCODE_MAP.put("DEI", 0x16);
+            OPCODE_MAP.put("DEI2", 0x36);
+            OPCODE_MAP.put("STZ", 0x13);
+            OPCODE_MAP.put("STZ2", 0x33);
+            OPCODE_MAP.put("LDZ", 0x12);
+            OPCODE_MAP.put("LDZ2", 0x32);
+            OPCODE_MAP.put("STA", 0x15);
+            OPCODE_MAP.put("STA2", 0x35);
+            OPCODE_MAP.put("LDA", 0x14);
+            OPCODE_MAP.put("LDA2", 0x34);
+            OPCODE_MAP.put("STH", 0x0f);
+            OPCODE_MAP.put("STH2", 0x2f);
+            OPCODE_MAP.put("STR", 0x05);
+            OPCODE_MAP.put("STR2", 0x25);
+            OPCODE_MAP.put("LDR", 0x04);
+            OPCODE_MAP.put("LDR2", 0x24);
+            OPCODE_MAP.put("POP", 0x02);
+            OPCODE_MAP.put("POP2", 0x22);
+            OPCODE_MAP.put("DUP", 0x03);
+            OPCODE_MAP.put("DUP2", 0x23);
+            OPCODE_MAP.put("SWP", 0x01);
+            OPCODE_MAP.put("SWP2", 0x21);
+            OPCODE_MAP.put("OVR", 0x09);
+            OPCODE_MAP.put("OVR2", 0x29);
+            OPCODE_MAP.put("ROT", 0x0a);
+            OPCODE_MAP.put("ROT2", 0x2a);
+            OPCODE_MAP.put("EQU", 0x08);
+            OPCODE_MAP.put("EQU2", 0x28);
+            OPCODE_MAP.put("NEQ", 0x09);
+            OPCODE_MAP.put("NEQ2", 0x29);
+            OPCODE_MAP.put("GTH", 0x0a);
+            OPCODE_MAP.put("GTH2", 0x2a);
+            OPCODE_MAP.put("LTH", 0x0b);
+            OPCODE_MAP.put("LTH2", 0x2b);
+            OPCODE_MAP.put("JMP", 0x0c);
+            OPCODE_MAP.put("JMP2", 0x2c);
+            OPCODE_MAP.put("JCN", 0x0d);
+            OPCODE_MAP.put("JCN2", 0x2d);
+            OPCODE_MAP.put("JSR", 0x0e);
+            OPCODE_MAP.put("JSR2", 0x2e);
+            OPCODE_MAP.put("INC", 0x01);
+            OPCODE_MAP.put("INC2", 0x21);
+            OPCODE_MAP.put("NIP", 0x02);
+            OPCODE_MAP.put("NIP2", 0x22);
 
         }
 

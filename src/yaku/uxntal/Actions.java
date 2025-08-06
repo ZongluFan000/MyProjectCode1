@@ -95,6 +95,13 @@ public class Actions {
         
 
 
+        OPCODE_MAP.put(0x01, "INC");     // INC 与 SWP 共用 0x01
+        OPCODE_MAP.put(0x21, "INC2");    // INC2 与 SWP2 共用 0x21
+        OPCODE_MAP.put(0x02, "NIP");     // NIP 与 POP 共用 0x02
+        OPCODE_MAP.put(0x22, "NIP2");    // NIP2 与 POP2 共用 0x22
+
+
+
     }
 
     // 指令元信息表
@@ -181,16 +188,38 @@ public class Actions {
     ACTION_TABLE.put("DEO",   new Action("DEO",   2, false, true,  Actions::deo));
     ACTION_TABLE.put("DEO2",  new Action("DEO2",  2, false, true,  (a,s,r,k,vm)->deo(a,2,r,k,vm)));
 
+
+
+        // 栈操作 - 增加 INC, INC2, NIP, NIP2
+    ACTION_TABLE.put("INC",   new Action("INC",   1, false, true,  Actions::inc));
+    ACTION_TABLE.put("INC2",  new Action("INC2",  1, false, true,  (a,s,r,k,vm)->inc(a,2,r,k,vm)));
+    ACTION_TABLE.put("NIP",   new Action("NIP",   2, false, true,  Actions::nip));
+    ACTION_TABLE.put("NIP2",  new Action("NIP2",  2, false, true,  (a,s,r,k,vm)->nip(a,2,r,k,vm)));
+
     }
 
     // ==== 指令实现 ====
     public static Interpreter.StackElem brk(Interpreter.StackElem[] args, int sz, int rs, int keep, Interpreter uxn) {
         System.exit(0); return null;
     }
+
+
+
+
     public static Interpreter.StackElem inc(Interpreter.StackElem[] args, int sz, int rs, int keep, Interpreter uxn) {
-        int res = (args[0].value + 1);
-        return new Interpreter.StackElem((short) ((sz == 1) ? (res & 0xFF) : (res & 0xFFFF)), sz);
+        int val = args[0].value;
+        int res = val + 1;
+        if (sz == 1) {
+            res &= 0xFF;
+        } else {
+            res &= 0xFFFF;
+        }
+        return new Interpreter.StackElem((short)res, sz);
     }
+    
+
+
+    
     public static Interpreter.StackElem pop(Interpreter.StackElem[] args, int sz, int rs, int keep, Interpreter uxn) {
         return null;
     }
@@ -393,6 +422,7 @@ public class Actions {
             uxn.pc += 2;
         }
         return null;
+    
     }
 
    

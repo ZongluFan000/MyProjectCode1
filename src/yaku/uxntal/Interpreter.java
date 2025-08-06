@@ -99,7 +99,8 @@ public class Interpreter {
                     showStacks();
                     break;
                 }
-    
+    ///////////////////////////////////////////////////////////////////////
+    System.out.println("After " + mnem + ": WorkStack = " + stack);
                 pc++;
             }
         } catch (Exception e) {
