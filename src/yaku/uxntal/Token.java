@@ -51,6 +51,11 @@ public class Token {
     public int isChild;      // Whether to sub-tag/reference
     public int line;         
     public boolean group = false; //  token group
+
+    public int sz;   // size: 1或2
+    public int r;    // r修饰符
+    public int k;    // k修饰符
+
     private Token[] groupTokens = null;
 
     

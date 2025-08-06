@@ -7,7 +7,7 @@ import yaku.uxntal.units.UxnState;
 
 
 public class Parser {
-    /** 结果数据结构 */
+    //结果数据结构
     public static class ParseResult {
         public List<Token> tokens;
         public List<int[]> lineIdxs; // 每个 token 的 [lineNum, fileIdx]
@@ -22,8 +22,8 @@ public class Parser {
 
 
 
-    // ------------- 主入口 -------------
-    /** 解析 .tal 源文件（全静态，无成员变量） */
+    //主入口
+    //解析 .tal 源文件（全静态，无成员变量）
     public static ParseResult parseProgram(String programFile, UxnState initialUxn) throws Exception {
         String programText = new String(Files.readAllBytes(Paths.get(programFile)));
         UxnState uxn = (initialUxn != null) ? initialUxn : new UxnState();
@@ -48,58 +48,48 @@ public class Parser {
         return new ParseResult(pr.tokens, pr.lineIdxs, uxn);
     }
 
-    // ------------ 词法分析核心 ------------
-    // private static void tokenize(String sourceText, String filename, List<LexerToken> tokens, List<int[]> lineMapping) {
-    //     String cleanText = sourceText.replace("\r\n", "\n").replace("\r", "\n");
-    //     String[] lines = cleanText.split("\n");
-    //     int lineNum = 1;
-    //     for (String line : lines) {
-    //         for (String mark : line.trim().split("\\s+")) {
-    //             if (mark.isEmpty()) continue;
-    //             LexerToken lt = parseMark(mark, lineNum, filename);
-    //             if (lt != null) {
-    //                 tokens.add(lt);
-    //                 lineMapping.add(new int[]{lineNum, filename.hashCode()}); // 可扩展为文件映射
-    //             }
-    //         }
-    //         lineNum++;
-    //     }
-    // }
+  
 
 
-    private static void tokenize(String sourceText, String filename, List<LexerToken> tokens, List<int[]> lineMapping) {
-        String cleanText = sourceText.replace("\r\n", "\n").replace("\r", "\n");
-        String[] lines = cleanText.split("\n");
-        int lineNum = 1;
-        for (String line : lines) {
-            StringBuilder noComment = new StringBuilder();
-            int depth = 0;
-            for (int i = 0; i < line.length(); i++) {
-                char c = line.charAt(i);
-                if (c == '(') {
-                    depth++;
-                } else if (c == ')') {
-                    if (depth > 0) depth--;
-                } else {
-                    if (depth == 0) noComment.append(c);
+        private static void tokenize(String sourceText, String filename, List<LexerToken> tokens, List<int[]> lineMapping) {
+            String cleanText = sourceText.replace("\r\n", "\n").replace("\r", "\n");
+            String[] lines = cleanText.split("\n");
+            int lineNum = 1;
+            for (String line : lines) {
+                StringBuilder noComment = new StringBuilder();
+                int depth = 0;
+                for (int i = 0; i < line.length(); i++) {
+                    char c = line.charAt(i);
+                    if (c == '(') {
+                        depth++;
+                    } else if (c == ')') {
+                        if (depth > 0) depth--;
+                    } else {
+                        if (depth == 0) noComment.append(c);
+                    }
                 }
-            }
-            for (String mark : noComment.toString().trim().split("\\s+")) {
-                if (mark.isEmpty()) continue;
-                LexerToken lt = parseMark(mark, lineNum, filename);
-                if (lt != null) {
-                    tokens.add(lt);
-                    lineMapping.add(new int[]{lineNum, filename.hashCode()});
+                for (String mark : noComment.toString().trim().split("\\s+")) {
+                    if (mark.isEmpty()) continue;
+                    LexerToken lt = parseMark(mark, lineNum, filename);
+                    if (lt != null) {
+            //////////////////////////////////////////////////////
+            System.out.println("Parsed token: " + lt);
+                        tokens.add(lt);
+                        lineMapping.add(new int[]{lineNum, filename.hashCode()});
+                    }
                 }
+                lineNum++;
             }
-            lineNum++;
         }
-    }
-    
+        
 
 
-    // ----------- 单个 token 解析，兼容 JS 版 lexer -----------
+    // 单个 token 解析，兼容 JS 版 lexer
     private static LexerToken parseMark(String mark, int lineNum, String filename) {
+
+
+
+        
         if (mark.startsWith("#")) {
             String hexStr = mark.substring(1);
             if (!hexStr.matches("[0-9a-fA-F]{2}|[0-9a-fA-F]{4}"))
@@ -142,10 +132,11 @@ public class Parser {
         if (mark.matches("^[a-fA-F0-9]{2,4}$"))
             return new LexerToken(Definitions.TokenType.RAW, mark, (mark.length()==2)?1:2, lineNum, filename);
         return new LexerToken(Definitions.TokenType.UNKNOWN, mark, lineNum, filename);
+
     }
     
 
-    // ------- Include处理（递归，静态） ----------
+    // Include处理（递归，静态）
     private static List<LexerToken> processIncludes(List<LexerToken> tokens, String baseDir, Set<String> includedFiles) throws Exception {
         List<LexerToken> out = new ArrayList<>();
         for (LexerToken t : tokens) {
@@ -164,7 +155,7 @@ public class Parser {
         return out;
     }
 
-    // ------- 语法分析/Token生成 ----------
+    // 语法分析/Token生成 
     private static class ParseTokensResult {
         List<Token> tokens;
         List<int[]> lineIdxs;
@@ -226,7 +217,7 @@ public class Parser {
         return new ParseTokensResult(out, idxs);
     }
 
-    /** 词法分析用的临时结构 */
+    //词法分析用的临时结构 
     private static class LexerToken {
         public Definitions.TokenType type;
         public String value;

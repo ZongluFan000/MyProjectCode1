@@ -3,7 +3,7 @@ package yaku.uxntal;
 import java.util.Map;
 
 public class Flags {
-    // === 所有开关参数，全为 static 全局 ===
+    // 所有开关参数，全为 static 全局
     public static boolean WRS = false;   // Show working and return stacks at end
     public static boolean PQ  = false;   // Print generated code and quit
     public static boolean WW  = false;   // Fewer warnings and errors
@@ -14,7 +14,7 @@ public class Flags {
     public static boolean DBG = false;   // Debug mode
     public static int     VV  = 0;       // Verbosity level (0=quiet, 1=normal, 2=verbose, 3=very verbose)
 
-    // ===== Setter =====
+    // Setter 
     public static void setFlag(String flagName, boolean value) {
         switch (flagName) {
             case "WRS": WRS = value; break;
@@ -36,7 +36,7 @@ public class Flags {
         }
     }
 
-    // ===== Getter =====
+    // Getter
     public static boolean getFlag(String flagName) {
         switch (flagName) {
             case "WRS": return WRS;
@@ -55,16 +55,13 @@ public class Flags {
         throw new IllegalArgumentException("Unknown int flag: " + flagName);
     }
 
-    // ===== 重置全部为默认值 =====
+    //重置全部为默认值
     public static void resetFlags() {
         WRS = PQ = WW = IN = EE = FF = NSW = DBG = false;
         VV = 0;
     }
 
-    /**
-     * 从 options 对象批量设置（兼容 JS 的 setFlagsFromOptions）
-     * options 为 Map<String, Object>，键与 JS 版一致
-     */
+    
     public static void setFlagsFromOptions(Map<String, Object> options) {
         if (getBool(options, "showStacks")) WRS = true;
         if (getBool(options, "printAndQuit")) PQ = true;
@@ -89,7 +86,7 @@ public class Flags {
         return 0;
     }
 
-    // ====== Flag便捷getter（对齐JS）======
+    //Flag便捷getter（对齐JS）
     public static boolean shouldShowStacks()         { return WRS; }
     public static boolean shouldPrintAndQuit()       { return PQ; }
     public static boolean shouldShowFewerWarnings()  { return WW; }
@@ -121,7 +118,7 @@ public class Flags {
     public static boolean DBG() { return isDebugMode(); }
     public static int VV()      { return getVerbosity(); }
 
-    /** 调试输出当前所有 flags 状态，类似 debugFlags() */
+    //调试输出当前所有 flags 状态，类似 debugFlags() 
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();

@@ -13,7 +13,7 @@ public class Main {
     public static void main(String[] args) {
         try {
 
-////////////////////////////////////////////
+//////////////////////////////////////////
 System.out.println(Definitions.OPCODE_MAP) ;
 System.out.println("当前OPCODE_MAP：" + yaku.uxntal.Definitions.OPCODE_MAP);
 
@@ -81,8 +81,6 @@ System.out.println("当前OPCODE_MAP：" + yaku.uxntal.Definitions.OPCODE_MAP);
 
          
 
-        //    List<Token> tokens;
-        //    List<int[]> lineIdxs;
            if (useStdin) {
                String input = new BufferedReader(new InputStreamReader(System.in)).lines()
                        .reduce("", (a, b) -> a + "\n" + b);
@@ -97,7 +95,7 @@ System.out.println("当前OPCODE_MAP：" + yaku.uxntal.Definitions.OPCODE_MAP);
                uxn = parseRes.uxn;
            }
 
-/////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
            System.out.println("==== TOKENS DUMP ====");
            for (Token t : tokens) {
                System.out.println(t);
@@ -118,9 +116,23 @@ System.out.println("当前OPCODE_MAP：" + yaku.uxntal.Definitions.OPCODE_MAP);
                 return;
             }
             
-            // 9. 编码为内存（得到 byte[]）
+            // // 9. 编码为内存（得到 byte[]）
+            // Encoder.EncodeResult encodeResult = Encoder.encode(tokens);
+            // byte[] byteMemory = encodeResult.memory;
+            
+            // RomWriter.memToRom(byteMemory, !Boolean.TRUE.equals(options.get("no-rom")), romFile);
             Encoder.EncodeResult encodeResult = Encoder.encode(tokens);
             byte[] byteMemory = encodeResult.memory;
+            int codeEnd = encodeResult.pc;      // 结束位置
+            int romStart = 0x100;
+            byte[] romBytes = Arrays.copyOfRange(byteMemory, romStart, codeEnd);
+            
+            Files.write(Paths.get(romFile), romBytes);   // 或 RomWriter.memToRom(romBytes, ...)
+            System.out.println("ROM written: " + romFile + "，大小 " + romBytes.length + " 字节");
+            
+
+
+            
 
             // 10. -r 运行解释器
             if (Boolean.TRUE.equals(options.get("run"))) {
@@ -131,22 +143,23 @@ System.out.println("当前OPCODE_MAP：" + yaku.uxntal.Definitions.OPCODE_MAP);
                 }
             }
 
-            // 11. -a 汇编 .rom
-            if (Boolean.TRUE.equals(options.get("assemble"))) {
-                RomWriter.memToRom(byteMemory, !Boolean.TRUE.equals(options.get("no-rom")), romFile);
-                System.out.println("ROM written: " + romFile);
-            }
+          
+            Interpreter interpreter = new Interpreter(byteMemory); // 构造函数里直接保存 memory
+            interpreter.run();
+            
+            
 
         } catch (Exception e) {
             System.err.println("Error: " + e.getMessage());
             e.printStackTrace();
             System.exit(1);
         }
+
+
     }
 
-    /**
-     * 命令行参数解析，仿 JS 版 parseArgs 逻辑
-     */
+
+ 
     public static Map<String, Object> parseArgs(String[] args) {
         Map<String, Object> opts = new HashMap<>();
         List<String> positionals = new ArrayList<>();

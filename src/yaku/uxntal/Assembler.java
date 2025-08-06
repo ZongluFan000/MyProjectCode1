@@ -3,38 +3,33 @@ package yaku.uxntal;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
-// import yaku.uxntal.Token;
-// import yaku.uxntal.Definitions;
+
 
 public class Assembler {
 
-    // =========== 主接口：导出内存为 ROM =============
-    public static byte[] memToRom(Token[] memory, int free, boolean writeRom, String romFile, boolean verbose) throws Exception {
-        // 按 JS 版功能：只导出 0x100 ~ free
-        int startAddr = 0x100;
-        int len = free - startAddr;
-        byte[] bytes = new byte[len];
-        for (int i = 0; i < len; i++) {
-            Token token = memory[startAddr + i];
-            bytes[i] = tokenToByte(token);
-        }
-        // 去除尾部 0
-        byte[] trimmed = trimTrailingZeros(bytes);
 
-        if (verbose) {
-            System.out.println("[ROM 内容] " + createHexDump(trimmed, 16));
-        }
+  
 
-        if (writeRom) {
-            Files.write(Paths.get(romFile), trimmed);
-            if (verbose) {
-                System.out.println("已导出 ROM: " + romFile + " (" + trimmed.length + " bytes)");
-            }
-        }
-        return trimmed;
+public static byte[] memToRom(byte[] memory, boolean writeRom, String romFile) throws Exception {
+    int romStart = 0x100; // 入口
+    int end = memory.length;
+
+    // 去掉结尾多余的0
+    while (end > romStart && memory[end - 1] == 0) {
+        end--;
     }
+    byte[] trimmed = Arrays.copyOfRange(memory, romStart, end);
 
-    // =========== Token -> 字节流 =============
+    if (writeRom) {
+        Files.write(Paths.get(romFile), trimmed);
+    }
+    return trimmed;
+}
+
+
+    
+
+    // Token -> 字节流
 
     private static byte tokenToByte(Token token) {
         if (token == null) return 0;
@@ -80,7 +75,7 @@ public class Assembler {
         return (byte) instrByte;
     }
 
-    // =========== 工具方法 =============
+    //工具方法
 
     // 去除尾部零字节
     private static byte[] trimTrailingZeros(byte[] bytes) {
@@ -184,7 +179,7 @@ public class Assembler {
         public RomDiff(int addr, int b1, int b2) { address = addr; byte1 = b1; byte2 = b2; }
     }
 
-    // =========== 字节码流构造器 =============
+    //字节码流构造器
     public static class BytecodeBuilder {
         private final List<Byte> bytes = new ArrayList<>();
         private final Map<String, Integer> labels = new HashMap<>();
@@ -264,7 +259,7 @@ public class Assembler {
         }
     }
 
-    // =========== 指令编码器 =============
+    //指令编码器
     public static class InstructionEncoder {
         public static byte encode(String instruction, boolean shortMode, boolean returnMode, boolean keepMode) {
             switch (instruction.toUpperCase()) {

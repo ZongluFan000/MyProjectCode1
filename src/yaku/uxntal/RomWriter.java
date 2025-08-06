@@ -3,18 +3,11 @@ package yaku.uxntal;
 import java.io.FileOutputStream;
 import java.io.IOException;
 
-/**
- * ROM Writer: 将内存内容导出为 .rom 文件（适用于 Uxn 虚拟机或硬件烧录）
- */
+
+//将内存内容导出为 .rom 文件（适用于 Uxn 虚拟机或硬件烧录）
+ 
 public class RomWriter {
 
-    /**
-     * 将 byte[] 内存内容写入 .rom 文件
-     * @param memory    内存数据，通常是 Encoder.encode() 得到的 byte[]
-     * @param writeFile 是否实际写入文件（false 则仅调试打印提示）
-     * @param filename  输出文件名
-     * @throws IOException 文件写入异常
-     */
     public static void memToRom(byte[] memory, boolean writeFile, String filename) throws IOException {
         if (!writeFile) {
             System.out.println("[RomWriter] 测试模式：未写入 ROM 文件 (" + filename + ")");

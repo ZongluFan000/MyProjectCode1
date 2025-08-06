@@ -6,7 +6,7 @@ import yaku.uxntal.units.UxnState;
 
 public class PrettyPrint {
 
-    // === 单Token美化 ===
+    // 单Token美化
     public static String prettyPrintToken(Token token, boolean withIndex) {
         if (token == null) return "INVALID_TOKEN";
         String result = "";
@@ -61,7 +61,7 @@ public class PrettyPrint {
         return result;
     }
 
-    // === Tokens数组美化 ===
+    // Tokens数组美化
     public static String prettyPrintTokens(List<Token> tokens, boolean showIndices, int maxPerLine) {
         if (tokens == null || tokens.isEmpty()) return "[]";
         StringBuilder sb = new StringBuilder();
@@ -74,7 +74,7 @@ public class PrettyPrint {
         return sb.toString().trim();
     }
 
-    // === 高级格式化，美化打印 tokens（支持分组、类型显示、缩进）===
+    // 高级格式化，美化打印 tokens（支持分组、类型显示、缩进）
     public static String prettyPrint(List<Token> tokens, boolean showTypes, boolean showIndices, boolean groupByType, int maxPerLine, String indent) {
         if (tokens == null || tokens.isEmpty()) return "No tokens";
         if (groupByType) return prettyPrintGrouped(tokens, showTypes, showIndices, indent);
@@ -103,7 +103,7 @@ public class PrettyPrint {
         return sb.toString().trim();
     }
 
-    // === 按类型分组打印 ===
+    // 按类型分组打印 
     public static String prettyPrintGrouped(List<Token> tokens, boolean showTypes, boolean showIndices, String indent) {
         Map<TokenType, List<Token>> groups = new LinkedHashMap<>();
         for (Token token : tokens) {
@@ -120,7 +120,7 @@ public class PrettyPrint {
         return sb.toString();
     }
 
-    // === UXN状态美化 ===
+    // UXN状态美化
     public static String prettyPrintUxnState(UxnState uxn) {
         StringBuilder sb = new StringBuilder();
         sb.append("=== UXN State ===\n");
@@ -138,7 +138,7 @@ public class PrettyPrint {
         return sb.toString();
     }
 
-    // === UXN内存转储 ===
+    // UXN内存转储 
     public static String prettyPrintMemory(UxnState uxn, int start, int end) {
         if (end <= start) end = Math.min(uxn.free, start + 256);
         StringBuilder sb = new StringBuilder();
@@ -165,7 +165,7 @@ public class PrettyPrint {
         return sb.toString();
     }
 
-    // === 进制字符串辅助 ===
+    //进制字符串辅助 
     public static String toHex(String val, int sz) {
         int n;
         try {
