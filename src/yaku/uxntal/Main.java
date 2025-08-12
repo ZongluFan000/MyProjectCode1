@@ -1,253 +1,419 @@
 package yaku.uxntal;
-import yaku.uxntal.units.UxnState; 
-import java.nio.file.*;
-import java.io.*;
+
+import java.lang.reflect.*;
 import java.util.*;
-
-public class Main {
-
-
+import java.nio.file.*;
+import yaku.uxntal.units.UxnState;
 
 
+public final class Main {
 
     public static void main(String[] args) {
         try {
-
-//////////////////////////////////////////
-System.out.println(Definitions.OPCODE_MAP) ;
-System.out.println("当前OPCODE_MAP：" + yaku.uxntal.Definitions.OPCODE_MAP);
-
-
-
-            // 1. 解析命令行参数
-            Map<String, Object> options = parseArgs(args);
-            if (Boolean.TRUE.equals(options.get("help"))) {
-                showHelp();
+            if (args.length >= 2 && "-r".equals(args[0])) {
+                String talPath = args[1];
+                System.out.println(">>");
+                AsmBundle asm = assemble(talPath);
+                runInterpreter(asm);
                 return;
             }
 
-            boolean useStdin = Boolean.TRUE.equals(options.get("stdin"));
-            String inputFile = useStdin ? null : (String) options.getOrDefault("inputFile", null);
+            if (args.length >= 2 && "-a".equals(args[0])) {
+                String talPath = args[1];
+                String outPath = findOutPathArg(args, "-o");
+                if (outPath == null) outPath = deriveRomPath(talPath);
 
-            if (!useStdin && inputFile == null) {
-                System.err.println("Error: Please provide the path to the .tal file");
-                System.exit(1);
-            }
+                System.out.println(">>");
+                AsmBundle asm = assemble(talPath);
 
-            String romFile = "from_stdin.rom";
-            if (inputFile != null) {
-                romFile = inputFile.replaceAll("\\.tal$", ".rom");
-                if (!Files.exists(Paths.get(inputFile))) {
-                    System.err.println("Error: File not found: " + inputFile);
-                    System.exit(1);
+                Path out = Paths.get(outPath);
+                if (out.getParent() != null) Files.createDirectories(out.getParent());
+
+                // 使用 Encoder.EncodeResult 上的方法
+                if (!tryWriteRomViaEncodeResult(asm.encObj, out)) {
+                    // 退化 1：尝试 romSlice()
+                    byte[] slice = tryGetRomSlice(asm.encObj);
+                    if (slice == null) {
+                        // 退化 2：自己依据 memory + maxAddr 裁剪；再退化则从 0x0100 到末尾去掉尾部 0
+                        Integer maxAddr = getFieldOrNull(asm.encObj, "maxAddr", Integer.class);
+                        slice = trimRomFromMemory(asm.program, maxAddr);
+                    }
+                    Files.write(out, slice);
                 }
-            }
 
-            // 2. 设置 flags
-            Flags.setFlagsFromOptions(options);
-
-            // 3. 初始化 UxnState
-            int hasMain = Boolean.TRUE.equals(options.get("assume-main")) ? 2 : 0;
-            UxnState uxn = new UxnState(hasMain);
-
-            // 4. 解析 .tal 源码为 tokens
-            List<Token> tokens;
-            List<int[]> lineIdxs;
-            if (useStdin) {
-                String input = new BufferedReader(new InputStreamReader(System.in)).lines()
-                        .reduce("", (a, b) -> a + "\n" + b);
-                Parser.ParseResult parseRes = Parser.parseText(input, "from_stdin.tal", uxn);
-                tokens = parseRes.tokens;
-                lineIdxs = parseRes.lineIdxs;   
-                uxn = parseRes.uxn;
-            } else {
-                Parser.ParseResult parseRes = Parser.parseProgram(inputFile, uxn);
-                tokens = parseRes.tokens;
-                lineIdxs = parseRes.lineIdxs;
-                uxn = parseRes.uxn;
-            }
-
-            // 5. 补全 token 下标
-            for (int i = 0; i < tokens.size(); i++) {
-                tokens.get(i).line = i;
-            }
-
-            // 6. 检查 MAIN token
-            if (uxn.hasMain == 2) {
-                Token mainTok = new Token(Definitions.TokenType.MAIN, "main", 0);
-                tokens.add(0, mainTok);
-            }
-
-
-         
-
-           if (useStdin) {
-               String input = new BufferedReader(new InputStreamReader(System.in)).lines()
-                       .reduce("", (a, b) -> a + "\n" + b);
-               Parser.ParseResult parseRes = Parser.parseText(input, "from_stdin.tal", uxn);
-               tokens = parseRes.tokens;
-               lineIdxs = parseRes.lineIdxs;   
-               uxn = parseRes.uxn;
-           } else {
-               Parser.ParseResult parseRes = Parser.parseProgram(inputFile, uxn);
-               tokens = parseRes.tokens;
-               lineIdxs = parseRes.lineIdxs;
-               uxn = parseRes.uxn;
-           }
-
-///////////////////////////////////////////////////////////////////////////////
-           System.out.println("==== TOKENS DUMP ====");
-           for (Token t : tokens) {
-               System.out.println(t);
-           }
-           System.out.println("=====================");
-
-           // ...原流程继续...
-
-
-            // 7. 可选：错误检查
-            // if (!Flags.shouldShowFewerWarnings()) {
-            //     ErrorChecker.checkErrors(tokens, uxn);
-            // }
-
-            // 8. -p 只打印 token 并退出
-            if (Boolean.TRUE.equals(options.get("print-and-quit"))) {
-                PrettyPrint.prettyPrintTokens(tokens, true, 1);
+                // 计算最终大小用于提示
+                long size = Files.size(out);
+                System.out.printf("Wrote ROM: %s (%d bytes)%n", out.toString(), size);
                 return;
             }
-            
-            // // 9. 编码为内存（得到 byte[]）
-            // Encoder.EncodeResult encodeResult = Encoder.encode(tokens);
-            // byte[] byteMemory = encodeResult.memory;
-            
-            // RomWriter.memToRom(byteMemory, !Boolean.TRUE.equals(options.get("no-rom")), romFile);
-            Encoder.EncodeResult encodeResult = Encoder.encode(tokens);
-            byte[] byteMemory = encodeResult.memory;
-            int codeEnd = encodeResult.pc;      // 结束位置
-            int romStart = 0x100;
-            byte[] romBytes = Arrays.copyOfRange(byteMemory, romStart, codeEnd);
-            
-            Files.write(Paths.get(romFile), romBytes);   // 或 RomWriter.memToRom(romBytes, ...)
-            System.out.println("ROM written: " + romFile + "，大小 " + romBytes.length + " 字节");
-            
 
-
-            
-
-            // 10. -r 运行解释器
-            if (Boolean.TRUE.equals(options.get("run"))) {
-                Interpreter vm = new Interpreter(byteMemory);
-                vm.run();
-                if (Boolean.TRUE.equals(options.get("show-stacks"))) {
-                    vm.showStacks();
-                }
-            }
-
-          
-            Interpreter interpreter = new Interpreter(byteMemory); // 构造函数里直接保存 memory
-            interpreter.run();
-            
-            
-
-        } catch (Exception e) {
-            System.err.println("Error: " + e.getMessage());
-            e.printStackTrace();
+            printUsage();
+        } catch (Throwable t) {
+            System.err.println("Error: " + t.getMessage());
+            t.printStackTrace(System.err);
             System.exit(1);
         }
-
-
     }
 
+    private static void printUsage() {
+        System.out.println("Usage:");
+        System.out.println("  java -cp out yaku.uxntal.Main -r <path/to/program.tal>");
+        System.out.println("  java -cp out yaku.uxntal.Main -a <path/to/program.tal> [-o <output.rom>]");
+    }
 
- 
-    public static Map<String, Object> parseArgs(String[] args) {
-        Map<String, Object> opts = new HashMap<>();
-        List<String> positionals = new ArrayList<>();
+    private static String findOutPathArg(String[] args, String flag) {
+        for (int i = 0; i < args.length - 1; i++) {
+            if (flag.equals(args[i])) return args[i + 1];
+        }
+        return null;
+    }
 
-        for (int i = 0; i < args.length; i++) {
-            String arg = args[i];
-            switch (arg) {
-                case "-h":
-                case "--help":
-                    opts.put("help", true); break;
-                case "-r":
-                case "--run":
-                    opts.put("run", true); break;
-                case "-a":
-                case "--assemble":
-                    opts.put("assemble", true); break;
-                case "-D":
-                case "--no-rom":
-                    opts.put("no-rom", true); break;
-                case "-s":
-                case "--show-stacks":
-                    opts.put("show-stacks", true); break;
-                case "-p":
-                case "--print-and-quit":
-                    opts.put("print-and-quit", true); break;
-                case "-W":
-                case "--fewer-warnings":
-                    opts.put("fewer-warnings", true); break;
-                case "-S":
-                case "--no-stack-warnings":
-                    opts.put("no-stack-warnings", true); break;
-                case "-i":
-                case "--stdin":
-                    opts.put("stdin", true); break;
-                case "-m":
-                case "--assume-main":
-                    opts.put("assume-main", true); break;
-                case "-e":
-                case "--errors-from-warnings":
-                    opts.put("errors-from-warnings", true); break;
-                case "-f":
-                case "--fatal":
-                    opts.put("fatal", true); break;
-                case "-v":
-                case "--verbose":
-                    if (i + 1 < args.length) opts.put("verbose", args[++i]); break;
-                case "-d":
-                case "--debug":
-                    opts.put("debug", true); break;
-                default:
-                    if (arg.endsWith(".tal")) {
-                        opts.put("inputFile", arg);
-                    } else {
-                        positionals.add(arg);
-                    }
+    private static String deriveRomPath(String talPath) {
+        int dot = Math.max(talPath.lastIndexOf('.'), -1);
+        int slash = Math.max(talPath.lastIndexOf('/'), talPath.lastIndexOf('\\'));
+        if (dot > slash) return talPath.substring(0, dot) + ".rom";
+        return talPath + ".rom";
+    }
+
+    //Assembly flow
+
+    private static AsmBundle assemble(String talPath) throws Exception {
+        UxnState ourUxn = new UxnState();
+
+        
+        Class<?> parserK = Class.forName("yaku.uxntal.Parser");
+        Method pMethod = selectParserMethod(parserK);
+        Object parserInstance = Modifier.isStatic(pMethod.getModifiers()) ? null : newInstance(parserK);
+
+        Object[] pArgs = buildParserArgs(pMethod, talPath, ourUxn);
+        Object parseRes = invoke(pMethod, parserInstance, pArgs);
+
+        List<?> tokens = getFieldOrNull(parseRes, "tokens", List.class);
+        if (tokens == null) throw new IllegalStateException("Parser result does not expose 'tokens'.");
+
+        Object uxnObj = getFieldOrNull(parseRes, "uxn", Object.class);
+        if (uxnObj == null && pArgs.length == 2) uxnObj = pArgs[1];
+
+        // Encoder.encode(...)
+        Class<?> encK = Class.forName("yaku.uxntal.Encoder");
+        Object encRes = tryCallEncode(encK, tokens, uxnObj); // 可能是 byte[] 或 EncodeResult
+
+        // program: 如果是 EncodeResult，抓 memory；否则直接就是 byte[]
+        byte[] program = (encRes instanceof byte[])
+                ? (byte[]) encRes
+                : firstByteArrayField(encRes); // EncodeResult.memory
+
+        if (program == null) throw new IllegalStateException("Encoder result does not contain program bytes.");
+
+        Map<Integer, ?> revSym = getFieldOrNull(encRes, "reverseSymbolTable", Map.class);
+        if (revSym == null && uxnObj != null) {
+            revSym = getFieldOrNull(uxnObj, "reverseSymbolTable", Map.class);
+        }
+        if (revSym == null) revSym = Collections.emptyMap();
+
+        return new AsmBundle(program, tokens, revSym, uxnObj, encRes);
+    }
+
+    //Parser selection helpers
+
+    private static Method selectParserMethod(Class<?> parserK) {
+        String[] names = {"parseProgram", "parseFile", "parse"};
+        List<Method> candidates = new ArrayList<>();
+
+        for (Method m : parserK.getDeclaredMethods()) {
+            for (String want : names) if (m.getName().equals(want)) candidates.add(m);
+        }
+        if (candidates.isEmpty()) {
+            for (Method m : parserK.getMethods()) {
+                for (String want : names) if (m.getName().equals(want)) candidates.add(m);
             }
         }
-        opts.put("positionals", positionals);
-        return opts;
+        if (candidates.isEmpty()) {
+            throw new IllegalStateException("No suitable Parser method found (parseProgram/parseFile/parse).");
+        }
+
+        candidates.sort((a, b) -> {
+            int s = (Modifier.isStatic(b.getModifiers()) ? 1 : 0) - (Modifier.isStatic(a.getModifiers()) ? 1 : 0);
+            if (s != 0) return s;
+            int pc = b.getParameterCount() - a.getParameterCount();
+            if (pc != 0) return pc;
+            return namePriority(a.getName()) - namePriority(b.getName());
+        });
+
+        Method best = candidates.get(0);
+        best.setAccessible(true);
+        return best;
     }
 
-    /**
-     * 帮助信息
-     */
-    public static void showHelp() {
-        System.out.println(
-                "Yaku-Java - Uxntal assembler and interpreter\n" +
-                        "\nUsage: java -jar yaku.jar [options] <.tal file>\n" +
-                        "\nOptions:\n" +
-                        "  -h, --help                    Show this help message\n" +
-                        "  -r, --run                     Run the program\n" +
-                        "  -a, --assemble                Assemble the program into a .rom file\n" +
-                        "  -D, --no-rom                  Don't write .rom file (for test/debug)\n" +
-                        "  -s, --show-stacks             Show the stacks at the end of the run\n" +
-                        "  -p, --print-and-quit          Print generated code and exit\n" +
-                        "  -W, --fewer-warnings          Fewer warning and error messages\n" +
-                        "  -S, --no-stack-warnings       No warnings for byte/short mismatch on stack manipulation instructions\n" +
-                        "  -i, --stdin                   Take input from stdin instead of a file\n" +
-                        "  -m, --assume-main             Assume a 'main' |0100 at the start of the program\n" +
-                        "  -e, --errors-from-warnings    Turn all warnings into errors\n" +
-                        "  -f, --fatal                   Fatal mode - die on the first error\n" +
-                        "  -v, --verbose <level>         Verbosity level (0-3)\n" +
-                        "  -d, --debug                   Enable debug mode\n" +
-                        "\nExamples:\n" +
-                        "  java -jar yaku.jar -r hello.tal             Run hello.tal\n" +
-                        "  java -jar yaku.jar -a hello.tal             Assemble hello.tal to hello.rom\n" +
-                        "  java -jar yaku.jar -p hello.tal             Print generated code for hello.tal\n" +
-                        "  echo \"#42 #18 DEO BRK\" | java -jar yaku.jar -i -r    Run code from stdin\n"
+    private static int namePriority(String name) {
+        if ("parseProgram".equals(name)) return 0;
+        if ("parseFile".equals(name)) return 1;
+        if ("parse".equals(name)) return 2;
+        return 3;
+    }
+
+    private static Object[] buildParserArgs(Method m, String talPath, UxnState ourUxn) throws Exception {
+        Class<?>[] pt = m.getParameterTypes();
+        if (pt.length == 1) {
+            if (pt[0] != String.class) throw new IllegalStateException("Parser method takes 1 param but not String.");
+            return new Object[]{ talPath };
+        } else if (pt.length == 2) {
+            if (pt[0] != String.class) throw new IllegalStateException("Parser method 1st param must be String.");
+            Class<?> uxnt = pt[1];
+            Object uxnArg;
+            if (uxnt.isAssignableFrom(UxnState.class)) {
+                uxnArg = ourUxn;
+            } else {
+                Constructor<?> c = uxnt.getDeclaredConstructor();
+                c.setAccessible(true);
+                uxnArg = c.newInstance();
+            }
+            return new Object[]{ talPath, uxnArg };
+        } else {
+            throw new IllegalStateException("Parser method param count not supported: " + pt.length);
+        }
+    }
+
+    //Encoder reflection
+
+    private static Object tryCallEncode(Class<?> encK, List<?> tokens, Object uxnObj) throws Exception {
+        // Try static encode
+        for (Method m : encK.getDeclaredMethods()) {
+            if (!m.getName().equals("encode")) continue;
+            Class<?>[] pt = m.getParameterTypes();
+            if (pt.length == 2 && List.class.isAssignableFrom(pt[0])) {
+                m.setAccessible(true);
+                return m.invoke(null, tokens, uxnObj);
+            }
+        }
+        for (Method m : encK.getMethods()) {
+            if (!m.getName().equals("encode")) continue;
+            Class<?>[] pt = m.getParameterTypes();
+            if (pt.length == 2 && List.class.isAssignableFrom(pt[0])) {
+                return m.invoke(null, tokens, uxnObj);
+            }
+        }
+
+        // Try static encode(List)
+        try {
+            Method m = encK.getMethod("encode", List.class);
+            return m.invoke(null, tokens);
+        } catch (NoSuchMethodException ignore) {}
+
+        // Try instance encode(...)
+        Object enc = newInstance(encK);
+        for (Method m : encK.getDeclaredMethods()) {
+            if (!m.getName().equals("encode")) continue;
+            Class<?>[] pt = m.getParameterTypes();
+            if (pt.length == 2 && List.class.isAssignableFrom(pt[0])) {
+                m.setAccessible(true);
+                return m.invoke(enc, tokens, uxnObj);
+            }
+            if (pt.length == 1 && List.class.isAssignableFrom(pt[0])) {
+                m.setAccessible(true);
+                return m.invoke(enc, tokens);
+            }
+        }
+        for (Method m : encK.getMethods()) {
+            if (!m.getName().equals("encode")) continue;
+            Class<?>[] pt = m.getParameterTypes();
+            if (pt.length == 2 && List.class.isAssignableFrom(pt[0])) {
+                return m.invoke(enc, tokens, uxnObj);
+            }
+            if (pt.length == 1 && List.class.isAssignableFrom(pt[0])) {
+                return m.invoke(enc, tokens);
+            }
+        }
+
+        throw new IllegalStateException("No suitable Encoder.encode(...) found.");
+    }
+
+    //Interpreter launch logic/
+
+    private static void runInterpreter(AsmBundle asm) throws Exception {
+        Class<?> ik = Class.forName("yaku.uxntal.Interpreter");
+
+        // Attempt 0: Interpreter(byte[], List, Map).run()
+        try {
+            Constructor<?> c = ik.getConstructor(byte[].class, List.class, Map.class);
+            Object vm = c.newInstance(asm.program, asm.tokens, asm.reverseSymbolTable);
+            Method runM = ik.getMethod("run");
+            runM.invoke(vm);
+            return;
+        } catch (NoSuchMethodException ignore) {}
+
+        // Attempt 1: new Interpreter(byte[]).run()
+        try {
+            Constructor<?> c = ik.getConstructor(byte[].class);
+            Object vm = c.newInstance(asm.program);
+            Method runM = ik.getMethod("run");
+            runM.invoke(vm);
+            return;
+        } catch (NoSuchMethodException ignore) {}
+
+        // Attempt 2: Interpreter.runProgram(byte[])
+        try {
+            Method runProg = ik.getMethod("runProgram", byte[].class);
+            runProg.invoke(null, asm.program);
+            return;
+        } catch (NoSuchMethodException ignore) {}
+
+        
+        try {
+            
+            try {
+                Constructor<?> c = ik.getConstructor(UxnState.class);
+                Object arg = (asm.uxnObj instanceof UxnState) ? asm.uxnObj : new UxnState();
+                Object vm = c.newInstance(arg);
+                Method runM = ik.getMethod("run");
+                runM.invoke(vm);
+                return;
+            } catch (NoSuchMethodException ignored) {}
+
+       
+            if (asm.uxnObj != null) {
+                for (Constructor<?> c : ik.getConstructors()) {
+                    Class<?>[] pt = c.getParameterTypes();
+                    if (pt.length == 1 && pt[0].getSimpleName().equals("UxnState") && pt[0].isInstance(asm.uxnObj)) {
+                        Object vm = c.newInstance(asm.uxnObj);
+                        Method runM = ik.getMethod("run");
+                        runM.invoke(vm);
+                        return;
+                    }
+                }
+            }
+        } catch (ReflectiveOperationException ignore) {}
+
+        throw new IllegalStateException(
+            "No compatible Interpreter found. Tried: " +
+            "Interpreter(byte[], List, Map).run(), new Interpreter(byte[]).run(), " +
+            "Interpreter.runProgram(byte[]), new Interpreter(UxnState).run(), " +
+            "new Interpreter(<any UxnState-like>).run()."
         );
+    }
+
+    //utils
+
+    private static Object newInstance(Class<?> k) {
+        try {
+            Constructor<?> c = k.getDeclaredConstructor();
+            c.setAccessible(true);
+            return c.newInstance();
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Cannot instantiate " + k.getName() + " (needs no-arg ctor).", e);
+        }
+    }
+
+    private static Object invoke(Method m, Object recv, Object[] args) {
+        try {
+            m.setAccessible(true);
+            return m.invoke(recv, args);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(m.getDeclaringClass().getName() + "." + m.getName() + " invocation failed", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T getFieldOrNull(Object o, String name, Class<T> type) {
+        if (o == null) return null;
+        try {
+            Field f = findField(o.getClass(), name);
+            f.setAccessible(true);
+            Object v = f.get(o);
+            if (v == null) return null;
+            if (!type.isInstance(v)) return null;
+            return (T) v;
+        } catch (ReflectiveOperationException e) {
+            return null;
+        }
+    }
+
+    private static Field findField(Class<?> k, String name) throws NoSuchFieldException {
+        Class<?> cur = k;
+        while (cur != null) {
+            try {
+                return cur.getDeclaredField(name);
+            } catch (NoSuchFieldException e) {
+                cur = cur.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldException(name);
+    }
+
+    private static byte[] firstByteArrayField(Object o) throws Exception {
+        if (o == null) return null;
+        for (Field f : getAllFields(o.getClass())) {
+            if (f.getType() == byte[].class) {
+                f.setAccessible(true);
+                return (byte[]) f.get(o);
+            }
+        }
+        return null;
+    }
+
+    private static List<Field> getAllFields(Class<?> k) {
+        List<Field> res = new ArrayList<>();
+        Class<?> cur = k;
+        while (cur != null) {
+            res.addAll(Arrays.asList(cur.getDeclaredFields()));
+            cur = cur.getSuperclass();
+        }
+        return res;
+    }
+
+    //ROM 写出与裁剪
+
+    // 调用 EncodeResult.writeRom(Path)
+    private static boolean tryWriteRomViaEncodeResult(Object encObj, Path out) {
+        if (encObj == null) return false;
+        try {
+            Method m = encObj.getClass().getMethod("writeRom", Path.class);
+            m.invoke(encObj, out);
+            return true;
+        } catch (ReflectiveOperationException ignore) {
+            return false;
+        }
+    }
+
+    // 若有 EncodeResult.romSlice() 则取之
+    private static byte[] tryGetRomSlice(Object encObj) {
+        if (encObj == null) return null;
+        try {
+            Method m = encObj.getClass().getMethod("romSlice");
+            Object r = m.invoke(encObj);
+            return (r instanceof byte[]) ? (byte[]) r : null;
+        } catch (ReflectiveOperationException ignore) {
+            return null;
+        }
+    }
+
+    // 回退方案：从 memory 中按 ORIGIN 裁剪，优先使用 maxAddr 决定终止位置，并去掉尾部 0
+    private static byte[] trimRomFromMemory(byte[] memory, Integer maxAddr) {
+        final int ORIGIN = Definitions.MAIN_ADDRESS;
+        if (memory == null || memory.length <= ORIGIN) return new byte[0];
+
+        int end = (maxAddr != null) ? Math.max(ORIGIN, Math.min(memory.length, maxAddr + 1))
+                                    : memory.length;
+
+        while (end > ORIGIN && memory[end - 1] == 0) end--;
+        return Arrays.copyOfRange(memory, ORIGIN, end);
+    }
+
+    //data holder
+
+    private static final class AsmBundle {
+        final byte[] program;                 // 通常是 64 KiB memory
+        final List<?> tokens;
+        final Map<Integer, ?> reverseSymbolTable;
+        final Object uxnObj;
+        final Object encObj;                  // 保留 Encoder.encode(...) 的原始返回，用于 -a
+
+        AsmBundle(byte[] program, List<?> tokens, Map<Integer, ?> reverseSymbolTable, Object uxnObj, Object encObj) {
+            this.program = Objects.requireNonNull(program, "program == null");
+            this.tokens = (tokens != null) ? tokens : Collections.emptyList();
+            this.reverseSymbolTable = (reverseSymbolTable != null) ? reverseSymbolTable : Collections.emptyMap();
+            this.uxnObj = uxnObj;
+            this.encObj = encObj;
+        }
     }
 }

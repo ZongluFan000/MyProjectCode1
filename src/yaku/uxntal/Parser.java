@@ -3,251 +3,575 @@ package yaku.uxntal;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
-import yaku.uxntal.units.UxnState;
-
+import java.io.IOException;
 
 public class Parser {
-    //结果数据结构
+
+    //Public API
     public static class ParseResult {
-        public List<Token> tokens;
-        public List<int[]> lineIdxs; // 每个 token 的 [lineNum, fileIdx]
-        public UxnState uxn;
-        public ParseResult(List<Token> tokens, List<int[]> lineIdxs, UxnState uxn) {
+        public final List<Token> tokens;
+        public final List<int[]> lineIdxs; // [lineNum, fileHash]
+        public final boolean hasMain;
+        public ParseResult(List<Token> tokens, List<int[]> lineIdxs, boolean hasMain) {
             this.tokens = tokens;
             this.lineIdxs = lineIdxs;
-            this.uxn = uxn;
+            this.hasMain = hasMain;
         }
     }
 
-
-
-
-    //主入口
-    //解析 .tal 源文件（全静态，无成员变量）
-    public static ParseResult parseProgram(String programFile, UxnState initialUxn) throws Exception {
+    //读取文件并解析（不再需要 UxnState） 
+    public static ParseResult parseProgram(String programFile) throws IOException {
         String programText = new String(Files.readAllBytes(Paths.get(programFile)));
-        UxnState uxn = (initialUxn != null) ? initialUxn : new UxnState();
-        // Tokenize
+
+        // 1) 词法（行号就地记录）
         List<LexerToken> rawTokens = new ArrayList<>();
         List<int[]> lineMapping = new ArrayList<>();
         tokenize(programText, programFile, rawTokens, lineMapping);
-        // include 处理（传递一个新的 Set 给递归）
-        List<LexerToken> tokensWithIncludes = processIncludes(rawTokens, Paths.get(programFile).getParent().toString(), new HashSet<>());
-        // 语法处理
-        ParseTokensResult pr = processTokens(tokensWithIncludes, lineMapping, uxn);
-        return new ParseResult(pr.tokens, pr.lineIdxs, uxn);
+
+        // 2) 递归处理 include
+        IncludeResult ir = processIncludes(rawTokens, lineMapping, baseDirOf(programFile), new HashSet<>());
+
+        // 3) 语义展开：STR、? / ! / { / }、普通标识符立即调用、未知助记符降级等
+        ParserState st = new ParserState();
+        ParseTokensResult pr = processTokens(ir.tokens, ir.lineMapping, st);
+
+        return new ParseResult(pr.tokens, pr.lineIdxs, st.hasMain);
     }
 
-    /** 解析直接传入的源代码文本（全静态） */
-    public static ParseResult parseText(String sourceText, String filename, UxnState initialUxn) {
-        UxnState uxn = (initialUxn != null) ? initialUxn : new UxnState();
+    //解析内存文本（不再需要 UxnState）
+    public static ParseResult parseText(String sourceText, String filename) {
         List<LexerToken> rawTokens = new ArrayList<>();
         List<int[]> lineMapping = new ArrayList<>();
         tokenize(sourceText, filename, rawTokens, lineMapping);
-        ParseTokensResult pr = processTokens(rawTokens, lineMapping, uxn);
-        return new ParseResult(pr.tokens, pr.lineIdxs, uxn);
+
+        IncludeResult ir = processIncludes(rawTokens, lineMapping, baseDirOf(filename), new HashSet<>());
+
+        ParserState st = new ParserState();
+        ParseTokensResult pr = processTokens(ir.tokens, ir.lineMapping, st);
+
+        return new ParseResult(pr.tokens, pr.lineIdxs, st.hasMain);
     }
 
-  
+    //nternal state/types
 
-
-        private static void tokenize(String sourceText, String filename, List<LexerToken> tokens, List<int[]> lineMapping) {
-            String cleanText = sourceText.replace("\r\n", "\n").replace("\r", "\n");
-            String[] lines = cleanText.split("\n");
-            int lineNum = 1;
-            for (String line : lines) {
-                StringBuilder noComment = new StringBuilder();
-                int depth = 0;
-                for (int i = 0; i < line.length(); i++) {
-                    char c = line.charAt(i);
-                    if (c == '(') {
-                        depth++;
-                    } else if (c == ')') {
-                        if (depth > 0) depth--;
-                    } else {
-                        if (depth == 0) noComment.append(c);
-                    }
-                }
-                for (String mark : noComment.toString().trim().split("\\s+")) {
-                    if (mark.isEmpty()) continue;
-                    LexerToken lt = parseMark(mark, lineNum, filename);
-                    if (lt != null) {
-            //////////////////////////////////////////////////////
-            System.out.println("Parsed token: " + lt);
-                        tokens.add(lt);
-                        lineMapping.add(new int[]{lineNum, filename.hashCode()});
-                    }
-                }
-                lineNum++;
-            }
-        }
-        
-
-
-    // 单个 token 解析，兼容 JS 版 lexer
-    private static LexerToken parseMark(String mark, int lineNum, String filename) {
-
-
-
-        
-        if (mark.startsWith("#")) {
-            String hexStr = mark.substring(1);
-            if (!hexStr.matches("[0-9a-fA-F]{2}|[0-9a-fA-F]{4}"))
-                throw new RuntimeException("Constant #" + hexStr + " must be two or four hex digits at line " + lineNum);
-            int sz = hexStr.length() == 4 ? 2 : 1;   // 关键
-            return new LexerToken(Definitions.TokenType.LIT, hexStr, sz, lineNum, filename);
-        }
-        if (mark.startsWith("~")) return new LexerToken(Definitions.TokenType.INCLUDE, mark.substring(1), lineNum, filename);
-        if (mark.startsWith("%")) throw new RuntimeException("Macros not yet supported at line " + lineNum);
-        if (mark.startsWith("\"") && mark.length() > 1) {
-            return new LexerToken(Definitions.TokenType.STR, mark.substring(1), lineNum, filename);
-        }
-        if (mark.matches("^[;,.\\._\\-=].+")) {
-            String prefix = mark.substring(0,1);
-            String refName = mark.substring(1);
-            int refType = Definitions.REF_TYPE_MAP.getOrDefault(prefix, Definitions.TokenType.REF.ordinal());
-            return new LexerToken(Definitions.TokenType.REF, refName, refType, 0, lineNum, filename);
-        }
-        if (mark.startsWith("@")) return new LexerToken(Definitions.TokenType.LABEL, mark.substring(1), 2, lineNum, filename);
-        if (mark.startsWith("&")) return new LexerToken(Definitions.TokenType.LABEL, mark.substring(1), 1, lineNum, filename);
-        if (mark.startsWith("|")) {
-            String val = mark.substring(1);
-            return new LexerToken(Definitions.TokenType.ADDR, val, Integer.parseInt(val, 16), lineNum, filename);
-        }
-        if (mark.startsWith("$")) {
-            String val = mark.substring(1);
-            return new LexerToken(Definitions.TokenType.PAD, val, Integer.parseInt(val, 16), lineNum, filename);
-        }
-        if (mark.matches("^[A-Z]{3}[2kr]*$")) {
-            String instr = mark.substring(0,3);
-            int sz=1, r=0, k=0;
-            if (mark.length() > 3) {
-                String flags = mark.substring(3);
-                sz = flags.contains("2") ? 2 : 1;
-                r  = flags.contains("r") ? 1 : 0;
-                k  = flags.contains("k") ? 1 : 0;
-            }
-            return new LexerToken(Definitions.TokenType.INSTR, instr, sz, r, k, lineNum, filename);
-        }
-        if (mark.matches("^[a-fA-F0-9]{2,4}$"))
-            return new LexerToken(Definitions.TokenType.RAW, mark, (mark.length()==2)?1:2, lineNum, filename);
-        return new LexerToken(Definitions.TokenType.UNKNOWN, mark, lineNum, filename);
-
-    }
-    
-
-    // Include处理（递归，静态）
-    private static List<LexerToken> processIncludes(List<LexerToken> tokens, String baseDir, Set<String> includedFiles) throws Exception {
-        List<LexerToken> out = new ArrayList<>();
-        for (LexerToken t : tokens) {
-            if (t.type == Definitions.TokenType.INCLUDE) {
-                String incFile = Paths.get(baseDir, t.value).toString();
-                if (includedFiles.contains(incFile)) continue;
-                includedFiles.add(incFile);
-                String content = new String(Files.readAllBytes(Paths.get(incFile)));
-                List<LexerToken> incTokens = new ArrayList<>();
-                tokenize(content, incFile, incTokens, new ArrayList<>());
-                out.addAll(processIncludes(incTokens, Paths.get(incFile).getParent().toString(), includedFiles));
-            } else {
-                out.add(t);
-            }
-        }
-        return out;
+    private static class ParserState {
+        int lambdaCount = 0;
+        Deque<Integer> lambdaStack = new ArrayDeque<>();
+        boolean hasMain = false;
     }
 
-    // 语法分析/Token生成 
+    private static class IncludeResult {
+        final List<LexerToken> tokens;
+        final List<int[]> lineMapping;
+        IncludeResult(List<LexerToken> tokens, List<int[]> lineMapping) {
+            this.tokens = tokens; this.lineMapping = lineMapping;
+        }
+    }
+
     private static class ParseTokensResult {
-        List<Token> tokens;
-        List<int[]> lineIdxs;
+        final List<Token> tokens;
+        final List<int[]> lineIdxs;
         ParseTokensResult(List<Token> tokens, List<int[]> lineIdxs) {
             this.tokens = tokens; this.lineIdxs = lineIdxs;
         }
     }
-    private static ParseTokensResult processTokens(List<LexerToken> lexerTokens, List<int[]> lineMapping, UxnState uxn) {
+
+    //仅用于词法阶段的内部 token
+    private static class LexerToken {
+        public Definitions.TokenType type;   // 正常类型；某些“语法糖”用 special 字段标注
+        public String value;                 // 助记符/标识符/字面量/文件名等
+        public int size, stack, keep;        // INSTR / LIT / RAW / PAD 等
+        public int refType, isChild;         // REF 的类型与子标志（0/1/2）
+        public String special;               // "QCALL","MCALL","Q_LAMBDA_START","LAMBDA_START","LAMBDA_END","IDENT"
+        public int lineNum;
+        public String filename;
+
+        LexerToken(Definitions.TokenType t, String v, int lineNum, String fn) {
+            this.type = t; this.value = v; this.lineNum = lineNum; this.filename = fn;
+        }
+        static LexerToken ofLit(String hex, int sz, int line, String fn) {
+            LexerToken lt = new LexerToken(Definitions.TokenType.LIT, hex, line, fn);
+            lt.size = sz; return lt;
+        }
+        static LexerToken ofRaw(String hex, int sz, int line, String fn) {
+            LexerToken lt = new LexerToken(Definitions.TokenType.RAW, hex, line, fn);
+            lt.size = sz; return lt;
+        }
+        static LexerToken ofInstr(String mnem, int sz, int r, int k, int line, String fn) {
+            LexerToken lt = new LexerToken(Definitions.TokenType.INSTR, mnem, line, fn);
+            lt.size = sz; lt.stack = r; lt.keep = k; return lt;
+        }
+        static LexerToken ofRef(String name, int refType, int isChild, int line, String fn) {
+            LexerToken lt = new LexerToken(Definitions.TokenType.REF, name, line, fn);
+            lt.refType = refType; lt.isChild = isChild; return lt;
+        }
+        static LexerToken ofPad(String hex, int size, int line, String fn) {
+            LexerToken lt = new LexerToken(Definitions.TokenType.PAD, hex, line, fn);
+            lt.size = size; return lt;
+        }
+        static LexerToken ofAddr(String hex, int line, String fn) {
+            return new LexerToken(Definitions.TokenType.ADDR, hex, line, fn);
+        }
+        static LexerToken ofLabel(String name, int kind, int line, String fn) { // kind: 2=parent,1=child
+            LexerToken lt = new LexerToken(Definitions.TokenType.LABEL, name, line, fn);
+            lt.size = kind; return lt;
+        }
+        static LexerToken ofMain(int line, String fn) {
+            return new LexerToken(Definitions.TokenType.MAIN, "", line, fn);
+        }
+        static LexerToken ofInclude(String path, int line, String fn) {
+            return new LexerToken(Definitions.TokenType.INCLUDE, path, line, fn);
+        }
+        static LexerToken ofStr(String s, int line, String fn) {
+            return new LexerToken(Definitions.TokenType.STR, s, line, fn);
+        }
+        static LexerToken ofSpecial(String what, String payload, int line, String fn) {
+            LexerToken lt = new LexerToken(Definitions.TokenType.PLACEHOLDER, payload, line, fn);
+            lt.special = what; return lt;
+        }
+    }
+
+    //Tokenization（含注释/字符串 FSM）
+
+    private static void tokenize(String sourceText, String filename,
+                                 List<LexerToken> out, List<int[]> lineMapping) {
+        String[] lines = normalizeNewlines(sourceText).split("\n", -1);
+
+        int commentDepth = 0; // 跨行
+        IntBox depthBox = new IntBox(commentDepth);
+
+        for (int lineNum = 1; lineNum <= lines.length; lineNum++) {
+            String line = lines[lineNum - 1].replace('\t', ' ');
+            String noComment = stripCommentsFSMOnLine(line, depthBox);
+
+            String[] marks = noComment.trim().isEmpty() ? new String[0] : noComment.trim().split("\\s+");
+            for (String mark : marks) {
+                if (mark.isEmpty()) continue;
+                LexerToken lt = parseMark(mark, lineNum, filename);
+                if (lt == null) continue; // [, ] → no-op
+                out.add(lt);
+                lineMapping.add(new int[]{lineNum, filename.hashCode()});
+            }
+        }
+
+        if (depthBox.value != 0) {
+            throw new RuntimeException("Error: Unbalanced comment parentheses in file: " + filename);
+        }
+    }
+
+    private static class IntBox { int value; IntBox(int v){ value=v; } }
+
+   
+    private static String stripCommentsFSMOnLine(String line, IntBox commentDepth) {
+        StringBuilder out = new StringBuilder();
+        String s = " " + line + " "; // 便于判断“空格包裹的括号”
+        boolean inStr = false;
+        char prev = 0;
+
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            char next = (i + 1 < s.length()) ? s.charAt(i + 1) : 0;
+
+            if (!inStr && ch == '"' && next != ' ') {
+                inStr = true;
+            } else if (inStr && next == ' ') {
+                inStr = false;
+            }
+
+            boolean parenInStr = inStr && (ch == '(' || ch == ')');
+
+            if (!inStr && ch == '(' && isSpace(prev) && isSpace(next)) {
+                commentDepth.value++;
+                prev = ch;
+                continue;
+            }
+            if (!inStr && ch == ')' && isSpace(prev) && isSpace(next)) {
+                commentDepth.value--;
+                if (commentDepth.value < 0) {
+                    throw new RuntimeException("Error: Comment invalid near line segment: " + line);
+                }
+                prev = ch;
+                continue;
+            }
+
+            if (commentDepth.value == 0 && (ch != '(' || parenInStr)) {
+                out.append(ch);
+            }
+
+            prev = ch;
+        }
+
+        return out.toString();
+    }
+
+    private static boolean isSpace(char c){
+        return c == ' ' || c == '\t' || c == 0;
+    }
+
+    private static String normalizeNewlines(String s){
+        return s.replace("\r\n","\n").replace("\r","\n");
+    }
+
+    //parseMark（单词到 LexerToken）
+
+    private static LexerToken parseMark(String mark, int lineNum, String filename) {
+        // include
+        if (mark.startsWith("~")) {
+            String path = mark.substring(1);
+            return LexerToken.ofInclude(path, lineNum, filename);
+        }
+        // 宏：与 Perl 一致，直接报错
+        if (mark.startsWith("%")) {
+            throw new RuntimeException("Error: Macros not yet supported at line " + lineNum);
+        }
+        // 匿名块界定符：no-op
+        if (mark.equals("[") || mark.equals("]")) {
+            return null;
+        }
+        // LIT #xx / #xxxx
+        if (mark.startsWith("#")) {
+            String hex = mark.substring(1);
+            if (!hex.matches("[0-9a-fA-F]{2}|[0-9a-fA-F]{4}")) {
+                throw new RuntimeException("Error: Constant #" + hex + " must be two or four hex digits at line " + lineNum);
+            }
+            int sz = (hex.length() == 4) ? 2 : 1;
+            return LexerToken.ofLit(hex.toLowerCase(Locale.ROOT), sz, lineNum, filename);
+        }
+        // 字符串：以空白结束；此处只收集，后面展开为 RAW
+        if (mark.startsWith("\"") && mark.length() > 1) {
+            return LexerToken.ofStr(mark.substring(1), lineNum, filename);
+        }
+        // REF：; , . _ - =
+        if (mark.matches("^[;,.\\_\\-=].+")) {
+            String rune = mark.substring(0,1);
+            String val  = mark.substring(1);
+            int isChild = 0;
+            if (val.contains("&")) { isChild = 1; val = val.replace("&",""); }
+            else if (val.contains("/")) { isChild = 2; /* 保留 '/' */ }
+            Integer rt = Definitions.REF_TYPE_MAP.get(rune);
+            if (rt == null) {
+                throw new RuntimeException("Error: Unknown reference rune '" + rune + "' at line " + lineNum);
+            }
+            return LexerToken.ofRef(val, rt, isChild, lineNum, filename);
+        }
+        // 标签
+        if (mark.startsWith("@")) {
+            return LexerToken.ofLabel(mark.substring(1), 2, lineNum, filename); // parent
+        }
+        if (mark.startsWith("&")) {
+            return LexerToken.ofLabel(mark.substring(1), 1, lineNum, filename); // child
+        }
+        // MAIN
+        if (mark.equals("|0100") || mark.equals("|100")) {
+            return LexerToken.ofMain(lineNum, filename);
+        }
+        // 绝对地址 |xxxx
+        if (mark.startsWith("|")) {
+            String hex = mark.substring(1);
+            if (hex.isEmpty() || !hex.matches("[0-9a-fA-F]+")) {
+                throw new RuntimeException("Error: Invalid <" + mark + "> at line " + lineNum);
+            }
+            return LexerToken.ofAddr(hex.toLowerCase(Locale.ROOT), lineNum, filename);
+        }
+        // 相对填充 $xxxx
+        if (mark.startsWith("$")) {
+            String hex = mark.substring(1);
+            if (hex.isEmpty() || !hex.matches("[0-9a-fA-F]+")) {
+                throw new RuntimeException("Error: Invalid <" + mark + "> at line " + lineNum);
+            }
+            int size = Integer.parseInt(hex, 16);
+            return LexerToken.ofPad(hex.toLowerCase(Locale.ROOT), size, lineNum, filename);
+        }
+        // 条件立即调用 ?{ / ?name
+        if (mark.startsWith("?{")) {
+            return LexerToken.ofSpecial("Q_LAMBDA_START", "", lineNum, filename);
+        }
+        if (mark.startsWith("?")) {
+            String val = mark.substring(1);
+            if (val.isEmpty()) {
+                throw new RuntimeException("Error: Invalid <" + mark + "> at line " + lineNum);
+            }
+            int isChild = 0;
+            if (val.contains("&")) { isChild = 1; val = val.replace("&",""); }
+            else if (val.contains("/")) { isChild = 1; /* Perl 对 ?child 用 1 */ }
+            LexerToken lt = LexerToken.ofSpecial("QCALL", val, lineNum, filename);
+            lt.isChild = isChild;
+            return lt;
+        }
+        // 无条件立即跳转 !name
+        if (mark.startsWith("!")) {
+            String val = mark.substring(1);
+            if (val.isEmpty()) {
+                throw new RuntimeException("Error: Invalid <" + mark + "> at line " + lineNum);
+            }
+            int isChild = 0;
+            if (val.contains("&")) { isChild = 1; val = val.replace("&",""); }
+            else if (val.contains("/")) { isChild = 1; }
+            LexerToken lt = LexerToken.ofSpecial("MCALL", val, lineNum, filename);
+            lt.isChild = isChild;
+            return lt;
+        }
+        // LAMBDA 块 { / }
+        if (mark.equals("{")) {
+            return LexerToken.ofSpecial("LAMBDA_START", "", lineNum, filename);
+        }
+        if (mark.equals("}")) {
+            return LexerToken.ofSpecial("LAMBDA_END", "", lineNum, filename);
+        }
+        // 指令（词法层识别；语义层查表，不存在则降级为立即调用）
+        if (mark.matches("^[A-Z]{3}[2rk]*$")) {
+            String instr = mark.substring(0,3);
+            String flags = (mark.length() > 3) ? mark.substring(3) : "";
+            int sz = flags.contains("2") ? 2 : 1;
+            int r  = flags.contains("r") ? 1 : 0;
+            int k  = flags.contains("k") ? 1 : 0;
+            return LexerToken.ofInstr(instr, sz, r, k, lineNum, filename);
+        }
+        // RAW：严格两位或四位
+        if (mark.matches("^[0-9a-fA-F]{2,4}$")) {
+            if (mark.length() == 2 || mark.length() == 4) {
+                int sz = (mark.length() == 2) ? 1 : 2;
+                return LexerToken.ofRaw(mark.toLowerCase(Locale.ROOT), sz, lineNum, filename);
+            } else {
+                throw new RuntimeException("Error: Invalid token <" + mark + "> at line " + lineNum);
+            }
+        }
+        // 其它 hex 但长度错误 → 报错
+        if (mark.matches("^[0-9a-fA-F]+$")) {
+            throw new RuntimeException("Error: Invalid number <" + mark + "> at line " + lineNum);
+        }
+        // 普通标识符 → 立即调用（与 Perl 相同）
+        if (mark.matches("^[<\\*\\+\\^\\w].+") || mark.matches("^\\w$")) {
+            return LexerToken.ofSpecial("IDENT", mark, lineNum, filename);
+        }
+
+        throw new RuntimeException("Error: Invalid token <" + mark + "> at line " + lineNum);
+    }
+
+    //include 展开
+
+    private static IncludeResult processIncludes(List<LexerToken> tokens, List<int[]> lineMapping,
+                                                 String baseDir, Set<String> includedFiles) {
+        List<LexerToken> outTokens = new ArrayList<>();
+        List<int[]> outMapping = new ArrayList<>();
+
+        for (int i = 0; i < tokens.size(); i++) {
+            LexerToken t = tokens.get(i);
+            int[] lm = (i < lineMapping.size()) ? lineMapping.get(i)
+                                                : new int[]{t.lineNum, t.filename.hashCode()};
+
+            if (t.type == Definitions.TokenType.INCLUDE) {
+                String incFile = Paths.get(baseDir, t.value).toString();
+                if (includedFiles.contains(incFile)) {
+                    // 已包含过则跳过（避免循环）
+                    continue;
+                }
+                includedFiles.add(incFile);
+                String content;
+                try {
+                    content = new String(Files.readAllBytes(Paths.get(incFile)));
+                } catch (IOException ex) {
+                    throw new RuntimeException("Failed to include " + t.value + " at line " + t.lineNum + " (" + t.filename + ")");
+                }
+                List<LexerToken> incTokens = new ArrayList<>();
+                List<int[]> incMapping = new ArrayList<>();
+                tokenize(content, incFile, incTokens, incMapping);
+
+                IncludeResult deeper = processIncludes(incTokens, incMapping, baseDirOf(incFile), includedFiles);
+                outTokens.addAll(deeper.tokens);
+                outMapping.addAll(deeper.lineMapping);
+            } else {
+                outTokens.add(t);
+                outMapping.add(lm);
+            }
+        }
+
+        return new IncludeResult(outTokens, outMapping);
+    }
+
+    private static String baseDirOf(String path) {
+        try {
+            java.nio.file.Path p = Paths.get(path);
+            java.nio.file.Path parent = p.getParent();
+            return (parent == null) ? "." : parent.toString();
+        } catch (Exception e) {
+            return ".";
+        }
+    }
+
+    //语义展开
+
+    private static ParseTokensResult processTokens(List<LexerToken> lexers, List<int[]> lineMapping, ParserState st) {
         List<Token> out = new ArrayList<>();
         List<int[]> idxs = new ArrayList<>();
-        String currentParent = "";
-        int currentAddress = 0;
-        for (int i=0; i<lexerTokens.size(); ++i) {
-            LexerToken t = lexerTokens.get(i);
-            int[] lineInfo = (i < lineMapping.size()) ? lineMapping.get(i) : new int[]{t.lineNum, t.filename.hashCode()};
-            switch (t.type) {
-                case ADDR:
-                    currentAddress = t.size;
-                    if (t.size == 0x100) uxn.hasMain = Math.max(uxn.hasMain, 1);
-                    out.add(t.toToken());
-                    idxs.add(lineInfo);
-                    break;
-                case PAD:
-                    int padSize = t.size;
-                    for (int j = 0; j < padSize; ++j) {
-                        out.add(new Token(Definitions.TokenType.RAW, "0", 1, t.lineNum));
+
+        final int REF_IMMED = 6; 
+
+        for (int i = 0; i < lexers.size(); i++) {
+            LexerToken t = lexers.get(i);
+            int[] lineInfo = (i < lineMapping.size()) ? lineMapping.get(i)
+                                                      : new int[]{t.lineNum, t.filename.hashCode()};
+
+            // 特殊语法优先展开
+            if (t.special != null) {
+                switch (t.special) {
+                    case "QCALL": { // ?name → JCI(2) + REF(name, IMMED, isChild)
+                        out.add(new Token(Definitions.TokenType.INSTR, "JCI", 2, 0, 0, t.lineNum));
                         idxs.add(lineInfo);
-                    }
-                    break;
-                case LABEL:
-                    if (t.size == 2) {
-                        currentParent = t.value;
-                        if (i+1<lexerTokens.size() && lexerTokens.get(i+1).type == Definitions.TokenType.PAD)
-                            uxn.allocationTable.put(currentParent, lexerTokens.get(i+1).size);
-                    } else {
-                        String fullName = currentParent.isEmpty() ? t.value : (currentParent + "/" + t.value);
-                        out.add(new Token(Definitions.TokenType.LABEL, fullName, 1, t.lineNum));
+                        out.add(new Token(Definitions.TokenType.REF, t.value, REF_IMMED,  t.isChild, t.lineNum));
                         idxs.add(lineInfo);
                         continue;
                     }
-                    out.add(t.toToken());
-                    idxs.add(lineInfo);
-                    break;
-                case REF:
-                    String refName = t.value;
-                    if (refName.contains("/")) t.isChild = 1;
-                    else if (!currentParent.isEmpty()) {
-                        refName = currentParent + "/" + refName;
-                        t.isChild = 1;
+                    case "MCALL": { // !name → JMI(2) + REF(name, IMMED, isChild)
+                        out.add(new Token(Definitions.TokenType.INSTR, "JMI", 2, 0, 0, t.lineNum));
+                        idxs.add(lineInfo);
+                        out.add(new Token(Definitions.TokenType.REF, t.value, REF_IMMED,  t.isChild, t.lineNum));
+                        idxs.add(lineInfo);
+                        continue;
                     }
-                    out.add(new Token(Definitions.TokenType.REF, refName, t.refType, t.isChild, t.lineNum));
+                    case "Q_LAMBDA_START": { // ?{
+                        int id = st.lambdaCount++;
+                        String lbl = id + "_LAMBDA";
+                        out.add(new Token(Definitions.TokenType.INSTR, "JCI", 2, 0, 0, t.lineNum));
+                        idxs.add(lineInfo);
+                        out.add(new Token(Definitions.TokenType.REF, lbl, REF_IMMED, 1, t.lineNum)); // child=1
+                        idxs.add(lineInfo);
+                        st.lambdaStack.push(id);
+                        continue;
+                    }
+                    case "LAMBDA_START": { // {
+                        int id = st.lambdaCount++;
+                        String lbl = id + "_LAMBDA";
+                        out.add(new Token(Definitions.TokenType.INSTR, "JSI", 2, 0, 0, t.lineNum));
+                        idxs.add(lineInfo);
+                        out.add(new Token(Definitions.TokenType.REF, lbl, REF_IMMED, 1, t.lineNum)); // child=1
+                        idxs.add(lineInfo);
+                        st.lambdaStack.push(id);
+                        continue;
+                    }
+                    case "LAMBDA_END": { // }
+                        if (st.lambdaStack.isEmpty()) {
+                            throw new RuntimeException("Error: Unmatched '}' at line " + t.lineNum + " (" + t.filename + ")");
+                        }
+                        int id = st.lambdaStack.pop();
+                        String lbl = id + "_LAMBDA";
+                        out.add(new Token(Definitions.TokenType.LABEL, lbl, 1, t.lineNum)); // child label
+                        idxs.add(lineInfo);
+                        continue;
+                    }
+                    case "IDENT": { // 普通标识符 → 立即调用
+                        out.add(new Token(Definitions.TokenType.INSTR, "JSI", 2, 0, 0, t.lineNum));
+                        idxs.add(lineInfo);
+                        out.add(new Token(Definitions.TokenType.REF, t.value, REF_IMMED, 0, t.lineNum));
+                        idxs.add(lineInfo);
+                        continue;
+                    }
+                }
+            }
+
+            // 常规类型
+            switch (t.type) {
+                case MAIN: {
+                    st.hasMain = true;
+                    out.add(new Token(Definitions.TokenType.MAIN, "", t.lineNum));
                     idxs.add(lineInfo);
                     break;
-                default:
-                    out.add(t.toToken());
+                }
+                case STR: { // 展开为 RAW（每个字符 1 字节）
+                    for (int k = 0; k < t.value.length(); k++) {
+                        int code = t.value.charAt(k);
+                        String hex = String.format(Locale.ROOT, "%02x", code & 0xFF);
+                        out.add(new Token(Definitions.TokenType.RAW, hex, 1, t.lineNum));
+                        idxs.add(lineInfo);
+                    }
+                    break;
+                }
+                case PAD: { // 不在 Parser 展开；交给 Encoder
+                    out.add(new Token(Definitions.TokenType.PAD, t.value, t.size, t.lineNum));
                     idxs.add(lineInfo);
+                    break;
+                }
+                case LABEL: { // 仅记录 parent/child；不合成 parent/child 全名
+                    out.add(new Token(Definitions.TokenType.LABEL, t.value, t.size, t.lineNum)); // size=2(parent)/1(child)
+                    idxs.add(lineInfo);
+                    break;
+                }
+                case REF: {
+                    out.add(new Token(Definitions.TokenType.REF, t.value, t.refType, t.isChild, t.lineNum));
+                    idxs.add(lineInfo);
+                    break;
+                }
+                case INSTR: {
+                    if (isKnownOpcode(t.value)) {
+                        out.add(new Token(Definitions.TokenType.INSTR, t.value, t.size, t.stack, t.keep, t.lineNum));
+                        idxs.add(lineInfo);
+                    } else {
+                        // 未知助记符 → 立即调用：JSI(2) + REF(name, IMMED)
+                        out.add(new Token(Definitions.TokenType.INSTR, "JSI", 2, 0, 0, t.lineNum));
+                        idxs.add(lineInfo);
+                        out.add(new Token(Definitions.TokenType.REF, t.value, REF_IMMED, 0, t.lineNum));
+                        idxs.add(lineInfo);
+                    }
+                    break;
+                }
+                case LIT:
+                case RAW:
+                case ADDR:
+                case UNKNOWN:
+                case EMPTY:
+                case INCLUDE:
+                case PLACEHOLDER:
+                default: {
+                    out.add(toFinalToken(t));
+                    idxs.add(lineInfo);
+                    break;
+                }
             }
         }
+
+        if (!st.lambdaStack.isEmpty()) {
+            throw new RuntimeException("Error: Unmatched '{' for lambda block(s).");
+        }
+
         return new ParseTokensResult(out, idxs);
     }
 
-    //词法分析用的临时结构 
-    private static class LexerToken {
-        public Definitions.TokenType type;
-        public String value;
-        public int size, stack, keep, refType, isChild, lineNum;
-        public String filename;
-        public LexerToken(Definitions.TokenType type, String value, int lineNum, String filename) {
-            this.type=type; this.value=value; this.lineNum=lineNum; this.filename=filename;
+    //尝试所有 (short, r, k) 组合，只要有一个能取到 opcode 就认为是合法助记符。
+    private static boolean isKnownOpcode(String mnem) {
+        boolean[] flags = new boolean[]{false, true};
+        for (boolean s : flags) {
+            for (boolean r : flags) {
+                for (boolean k : flags) {
+                    try {
+                        Definitions.getOpcodeByte(mnem, s, r, k);
+                        return true;
+                    } catch (RuntimeException ignore) {
+                        // 该组合不存在，继续尝试
+                    }
+                }
+            }
         }
-        public LexerToken(Definitions.TokenType type, String value, int size, int lineNum, String filename) {
-            this.type=type; this.value=value; this.size=size; this.lineNum=lineNum; this.filename=filename;
-        }
-        public LexerToken(Definitions.TokenType type, String value, int refType, int isChild, int lineNum, String filename) {
-            this.type=type; this.value=value; this.refType=refType; this.isChild=isChild; this.lineNum=lineNum; this.filename=filename;
-        }
-        public LexerToken(Definitions.TokenType type, String value, int sz, int r, int k, int lineNum, String filename) {
-            this.type=type; this.value=value; this.size=sz; this.stack=r; this.keep=k; this.lineNum=lineNum; this.filename=filename;
-        }
-        public Token toToken() {
-            if (type == Definitions.TokenType.LIT || type == Definitions.TokenType.RAW)
-                return new Token(type, value, size, lineNum);
-            if (type == Definitions.TokenType.LABEL)
-                return new Token(type, value, size, lineNum);
-            if (type == Definitions.TokenType.REF)
-                return new Token(type, value, refType, isChild, lineNum);
-            if (type == Definitions.TokenType.INSTR)
-                return new Token(type, value, size, stack, keep, lineNum);
-            return new Token(type, value, lineNum);
+        return false;
+    }
+
+    private static Token toFinalToken(LexerToken t) {
+        switch (t.type) {
+            case LIT:
+            case RAW:
+            case LABEL:
+                return new Token(t.type, t.value, t.size, t.lineNum);
+            case REF:
+                return new Token(t.type, t.value, t.refType, t.isChild, t.lineNum);
+            case INSTR:
+                return new Token(t.type, t.value, t.size, t.stack, t.keep, t.lineNum);
+            case PAD:
+                return new Token(t.type, t.value, t.size, t.lineNum);
+            case ADDR:
+                return new Token(t.type, t.value, t.lineNum);
+            case MAIN:
+                return new Token(t.type, "", t.lineNum);
+            default:
+                return new Token(t.type, t.value, t.lineNum);
         }
     }
 }
-
-
-

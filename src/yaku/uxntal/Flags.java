@@ -3,7 +3,7 @@ package yaku.uxntal;
 import java.util.Map;
 
 public class Flags {
-    // 所有开关参数，全为 static 全局
+    // 全局开关
     public static boolean WRS = false;   // Show working and return stacks at end
     public static boolean PQ  = false;   // Print generated code and quit
     public static boolean WW  = false;   // Fewer warnings and errors
@@ -11,10 +11,37 @@ public class Flags {
     public static boolean EE  = false;   // Turn warnings into errors
     public static boolean FF  = false;   // Fatal mode - stop on first error
     public static boolean NSW = false;   // No warnings for stack mismatches
+
+    // 扩展：统一管理调试与详细级别
     public static boolean DBG = false;   // Debug mode
     public static int     VV  = 0;       // Verbosity level (0=quiet, 1=normal, 2=verbose, 3=very verbose)
 
-    // Setter 
+    /**
+     * 在程序启动早期调用一次：从环境变量加载“默认值快照”，之后不再直接读取环境变量。
+     * 仅处理与 Perl 对齐的两项：YAKU_VERBOSE, YAKU_DBG。
+     */
+    public static void applyEnvDefaults() {
+        String vEnv = System.getenv("YAKU_VERBOSE");
+        if (vEnv != null) {
+            try { VV = Integer.parseInt(vEnv.trim()); } catch (NumberFormatException ignored) {}
+        }
+        String dbgEnv = System.getenv("YAKU_DBG");
+        if (isTruthy(dbgEnv)) {
+            DBG = true;
+        }
+    }
+
+    // --- 便捷 setter（对齐 Main 的调用） ---
+    public static void setVerbosity(Object obj) {
+        if (obj == null) return;
+        try {
+            if (obj instanceof Integer) VV = (Integer) obj;
+            else if (obj instanceof String) VV = Integer.parseInt(((String)obj).trim());
+        } catch (NumberFormatException ignored) {}
+    }
+    public static void setDebug(boolean v) { DBG = v; }
+
+    // Setter（通用）
     public static void setFlag(String flagName, boolean value) {
         switch (flagName) {
             case "WRS": WRS = value; break;
@@ -36,7 +63,7 @@ public class Flags {
         }
     }
 
-    // Getter
+    // Getter（通用）
     public static boolean getFlag(String flagName) {
         switch (flagName) {
             case "WRS": return WRS;
@@ -55,86 +82,96 @@ public class Flags {
         throw new IllegalArgumentException("Unknown int flag: " + flagName);
     }
 
-    //重置全部为默认值
+    // 重置为默认值
     public static void resetFlags() {
         WRS = PQ = WW = IN = EE = FF = NSW = DBG = false;
         VV = 0;
     }
 
-    
+    /**
+     * 从 options 设置（CLI/配置入口）。
+     * 兼容两类键名：驼峰(showStacks) 和 连字符(show-stacks)。
+     */
     public static void setFlagsFromOptions(Map<String, Object> options) {
-        if (getBool(options, "showStacks")) WRS = true;
-        if (getBool(options, "printAndQuit")) PQ = true;
-        if (getBool(options, "fewerWarnings")) WW = true;
+        // booleans
+        if (getBool(options, "show-stacks", "showStacks")) WRS = true;
+        if (getBool(options, "print-and-quit", "printAndQuit")) PQ = true;
+        if (getBool(options, "fewer-warnings", "fewerWarnings")) WW = true;
         if (getBool(options, "stdin")) IN = true;
-        if (getBool(options, "errorsFromWarnings")) EE = true;
+        if (getBool(options, "errors-from-warnings", "errorsFromWarnings")) EE = true;
         if (getBool(options, "fatal")) FF = true;
-        if (getBool(options, "noStackWarnings")) NSW = true;
+        if (getBool(options, "no-stack-warnings", "noStackWarnings")) NSW = true;
         if (getBool(options, "debug")) DBG = true;
-        if (options.containsKey("verbose") && options.get("verbose") != null)
-            VV = parseInt(options.get("verbose"));
-    }
-    private static boolean getBool(Map<String, Object> options, String key) {
-        Object v = options.get(key);
-        if (v instanceof Boolean) return (Boolean)v;
-        if (v instanceof String)  return Boolean.parseBoolean((String)v);
-        return false;
-    }
-    private static int parseInt(Object obj) {
-        if (obj instanceof Integer) return (Integer)obj;
-        if (obj instanceof String)  return Integer.parseInt((String)obj);
-        return 0;
+
+        // verbosity
+        Object v = get(options, "verbose");
+        if (v != null) setVerbosity(v);
     }
 
-    //Flag便捷getter（对齐JS）
-    public static boolean shouldShowStacks()         { return WRS; }
-    public static boolean shouldPrintAndQuit()       { return PQ; }
-    public static boolean shouldShowFewerWarnings()  { return WW; }
-    public static boolean shouldUseStdin()           { return IN; }
-    public static boolean shouldTreatWarningsAsErrors() { return EE; }
-    public static boolean shouldStopOnFirstError()   { return FF; }
-    public static boolean shouldSuppressStackWarnings() { return NSW; }
-    public static boolean isDebugMode() {
-        String dbgEnv = System.getenv("YAKU_DBG");
-        return DBG || (dbgEnv != null && dbgEnv.equals("1"));
-    }
-    public static int getVerbosity() {
-        String vEnv = System.getenv("YAKU_VERBOSE");
-        if (vEnv != null) {
-            try { return Integer.parseInt(vEnv); }
-            catch (NumberFormatException e) { return 0; }
-        }
-        return VV;
+    // --- 便捷语义别名（Main/其他模块可直接用） ---
+    public static boolean isDebug()               { return DBG; }
+    public static int     verbosity()             { return VV; }
+    public static boolean isFewerWarnings()       { return WW; }
+    public static boolean isNSW()                 { return NSW; }
+    public static boolean warningsBecomeErrors()  { return EE; }
+    public static boolean stopOnFirstError()      { return FF; }
+
+    // 旧版便捷 getter（保持不破坏现有调用）
+    public static boolean shouldShowStacks()              { return WRS; }
+    public static boolean shouldPrintAndQuit()            { return PQ; }
+    public static boolean shouldShowFewerWarnings()       { return WW; }
+    public static boolean shouldUseStdin()                { return IN; }
+    public static boolean shouldTreatWarningsAsErrors()   { return EE; }
+    public static boolean shouldStopOnFirstError()        { return FF; }
+    public static boolean shouldSuppressStackWarnings()   { return NSW; }
+    public static boolean isDebugMode()                   { return DBG; }
+    public static int    getVerbosity()                   { return VV; }
+
+    // 静态调试输出（无需实例化）
+    public static String debugFlags() {
+        return new Flags().toString();
     }
 
-    // 单独暴露每个 flag 的 getter 方便调用
-    public static boolean WRS() { return WRS; }
-    public static boolean PQ()  { return PQ; }
-    public static boolean WW()  { return WW; }
-    public static boolean IN()  { return IN; }
-    public static boolean EE()  { return EE; }
-    public static boolean FF()  { return FF; }
-    public static boolean NSW() { return NSW; }
-    public static boolean DBG() { return isDebugMode(); }
-    public static int VV()      { return getVerbosity(); }
-
-    //调试输出当前所有 flags 状态，类似 debugFlags() 
+    // 人类可读输出
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
         sb.append("Flags: ");
         boolean any = false;
-        if (WRS) { sb.append("WRS, "); any=true; }
-        if (PQ)  { sb.append("PQ, "); any=true; }
-        if (WW)  { sb.append("WW, "); any=true; }
-        if (IN)  { sb.append("IN, "); any=true; }
-        if (EE)  { sb.append("EE, "); any=true; }
-        if (FF)  { sb.append("FF, "); any=true; }
-        if (NSW) { sb.append("NSW, "); any=true; }
-        if (DBG) { sb.append("DBG, "); any=true; }
-        if (VV != 0) { sb.append("VV=").append(VV).append(", "); any=true; }
+        if (WRS) { sb.append("WRS, "); any = true; }
+        if (PQ)  { sb.append("PQ, ");  any = true; }
+        if (WW)  { sb.append("WW, ");  any = true; }
+        if (IN)  { sb.append("IN, ");  any = true; }
+        if (EE)  { sb.append("EE, ");  any = true; }
+        if (FF)  { sb.append("FF, ");  any = true; }
+        if (NSW) { sb.append("NSW, "); any = true; }
+        if (DBG) { sb.append("DBG, "); any = true; }
+        if (VV != 0) { sb.append("VV=").append(VV).append(", "); any = true; }
         if (!any) sb.append("none set");
-        else sb.setLength(sb.length() - 2); // 去掉最后的逗号和空格
+        else sb.setLength(sb.length() - 2); // 去掉末尾逗号空格
         return sb.toString();
+    }
+
+    // ---- 私有辅助 ----
+    private static boolean getBool(Map<String, Object> options, String... keys) {
+        for (String k : keys) {
+            Object v = options.get(k);
+            if (v instanceof Boolean && (Boolean) v) return true;
+            if (v instanceof String)  {
+                String s = ((String)v).trim().toLowerCase();
+                if ("1".equals(s) || "true".equals(s) || "yes".equals(s) || "y".equals(s) || "on".equals(s))
+                    return true;
+            }
+        }
+        return false;
+    }
+    private static Object get(Map<String, Object> options, String... keys) {
+        for (String k : keys) if (options.containsKey(k)) return options.get(k);
+        return null;
+    }
+    private static boolean isTruthy(String v) {
+        if (v == null) return false;
+        String s = v.trim().toLowerCase();
+        return "1".equals(s) || "true".equals(s) || "yes".equals(s) || "y".equals(s) || "on".equals(s);
     }
 }

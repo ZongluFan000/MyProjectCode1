@@ -4,64 +4,208 @@ import java.util.*;
 import yaku.uxntal.Definitions.TokenType;
 import yaku.uxntal.units.UxnState;
 
+/**
+ * PrettyPrint
+ *
+ * This class merges the previous Java implementation with Perl-parity behaviors:
+ * - Stateful prettyPrintStr() that reconstructs source-like output.
+ * - JSI/JCI/JMI prefix state ("", "?", "!") applied to the following REF I.
+ * - REF child references prepend '&' when isChild==1 and name has no '/'.
+ * - Lambda sugar: REF I *_LAMBDA -> "{", LABEL &*_LAMBDA -> "}".
+ * - MAIN and BRK newline rules aligned with Perl.
+ * - ADDR prints a trailing space; PAD is non-zero-padded hex; STR prints raw.
+ * - toHexBytes(...) uses byte-size semantics like Perl's toHex(n, sz).
+ */
 public class PrettyPrint {
 
-    // 单Token美化
-    public static String prettyPrintToken(Token token, boolean withIndex) {
-        if (token == null) return "INVALID_TOKEN";
-        String result = "";
-        switch (token.type) {
-            case MAIN:
-                result = "|0100";
-                break;
-            case LIT:
-                result = "#" + toHex(token.value, token.size == 2 ? 4 : 2);
-                break;
-            case INSTR:
-                result = token.value
-                        + (token.size == 2 ? "2" : "")
-                        + (token.stack == 1 ? "r" : "")
-                        + (token.keep == 1 ? "k" : "");
-                break;
-            case LABEL:
-                result = (token.size == 2 ? "@" : "&") + token.value;
-                break;
-            case REF:
-                String refPrefix = (token.refType >= 0 && token.refType < Definitions.REV_REF_TYPES.length)
-                        ? Definitions.REV_REF_TYPES[token.refType]
-                        : "?";
-                result = refPrefix + token.value;
-                if (token.isChild == 1) result += " (child)";
-                break;
-            case RAW:
-                result = toHex(token.value, token.size == 2 ? 4 : 2);
-                break;
-            case ADDR:
-                result = "|" + toHex(token.value, 4);
-                break;
-            case PAD:
-                result = "$" + toHex(token.value, 2);
-                break;
-            case EMPTY:
-                result = "EMPTY";
-                break;
-            case STR:
-                result = "\"" + token.value + "\"";
-                break;
-            case INCLUDE:
-                result = token.value;
-                break;
-            default:
-                result = token.type + "(" + token.value + ")";
+    //Public API
+
+    /**
+     * Perl-like, stateful formatter (closest to original Tal source).
+     * @param tokens token list
+     * @param noNewline if true, avoid final newlines where Perl would add them
+     */
+    public static String prettyPrintStr(List<Token> tokens, boolean noNewline) {
+        if (tokens == null || tokens.isEmpty()) return "";
+        String nl = noNewline ? "" : "\n";
+
+        StringBuilder out = new StringBuilder();
+        String prefix = ""; // For JSI/JCI/JMI => "", "?", "!"
+        String mws = " "; // default mid-white-space (space)
+        boolean skip = false;
+
+        for (int i = 0; i < tokens.size(); i++) {
+            Token t = tokens.get(i);
+            if (t == null) continue;
+
+            String s = "";
+            mws = " ";
+            skip = false;
+
+            switch (t.type) {
+                case MAIN: {
+                    s = nl + "|0100" + nl;
+                    mws = "";
+                    break;
+                }
+                case LABEL: {
+                    if (t.size == 1) { // child '&'
+                        if (endsWithLambda(t.value)) {
+                            s = "}";
+                        } else {
+                            // if previous isn't newline, start a new line (Perl often does this)
+                            if (out.length() > 0 && out.charAt(out.length() - 1) != '\n') s = nl;
+                            s += "&" + safe(t.value) + nl;
+                        }
+                    } else { // parent '@'
+                        s = nl;
+                        // Perl adds an extra newline if previous ended with !word (approximate with regex)
+                        if (out.toString().matches(".*![\\w\\-]+\n?$")) s += nl;
+                        s += "@" + safe(t.value);
+                        boolean nextIsPad = (i + 1 < tokens.size() && tokens.get(i + 1) != null
+                                && tokens.get(i + 1).type == TokenType.PAD);
+                        s += nextIsPad ? "" : nl;
+                        mws = ""; // align with Perl: no leading space for block labels
+                    }
+                    break;
+                }
+                case REF: {
+                    String rt = refTypeString(t);
+                    boolean isChild = (t.isChild == 1) && !containsSlash(t.value);
+                    String maybeChild = isChild ? "&" : "";
+                    if ("I".equals(rt)) {
+                        if (endsWithLambda(t.value) || t.value.matches("\\d+_LAMBDA")) {
+                            s = "{";
+                        } else {
+                            s = prefix + maybeChild + safe(t.value);
+                        }
+                        prefix = ""; // consume once
+                    } else {
+                        s = rt + maybeChild + safe(t.value);
+                    }
+                    break;
+                }
+                case INSTR: {
+                    String name = safe(t.value);
+                    if ("JSI".equals(name) || "JCI".equals(name) || "JMI".equals(name)) {
+                        prefix = "JSI".equals(name) ? "" : ("JCI".equals(name) ? "?" : "!");
+                        skip = true; // do not print these pseudo-instructions
+                    } else {
+                        s = name + (t.size == 2 ? "2" : "") + (t.stack == 1 ? "r" : "") + (t.keep == 1 ? "k" : "");
+                        // Perl: newline if next is not INSTR
+                        boolean nextIsInstr = (i + 1 < tokens.size() && tokens.get(i + 1) != null
+                                && tokens.get(i + 1).type == TokenType.INSTR);
+                        if (!nextIsInstr) s += nl;
+                        // Perl: prepend a newline before BRK
+                        if ("BRK".equals(name)) s = nl + s;
+                    }
+                    break;
+                }
+                case LIT: {
+                    int bytes = (t.size == 2 ? 2 : 1);
+                    s = "#" + toHexBytes(t.value, bytes);
+                    break;
+                }
+                case RAW: {
+                    int bytes = (t.size == 2 ? 2 : 1);
+                    s = toHexBytes(t.value, bytes);
+                    break;
+                }
+                case ADDR: {
+                    s = "|" + toHexBytes(t.value, 2) + " "; // trailing space
+                    break;
+                }
+                case PAD: {
+                    // Perl: $%x (no zero padding)
+                    long n = parseNumber(t.value);
+                    s = "$" + Long.toHexString(n);
+                    break;
+                }
+                case PLACEHOLDER:
+                case STR:
+                case INCLUDE: {
+                    s = safe(t.value); // raw
+                    break;
+                }
+                case EMPTY: {
+                    skip = true;
+                    break;
+                }
+                default: {
+                    s = t.type + "(" + safe(t.value) + ")";
+                }
+            }
+
+            if (!skip) out.append(mws).append(s);
         }
-        // 可选加索引
-        if (withIndex && token.line >= 0) {
-            result += "[" + token.line + "]";
-        }
-        return result;
+        return out.toString();
     }
 
-    // Tokens数组美化
+    //Convenience 
+    public static void prettyPrint(List<Token> tokens, boolean noNewline) {
+        System.out.print(prettyPrintStr(tokens, noNewline));
+        if (!noNewline) System.out.println();
+    }
+
+    //Single-token printer 
+    public static String prettyPrintToken(Token t, boolean withIndex) {
+        if (t == null) return "INVALID_TOKEN";
+        String out;
+        switch (t.type) {
+            case MAIN:
+                out = "|0100";
+                break;
+            case LABEL:
+                if (t.size == 1) { // child '&'
+                    out = endsWithLambda(t.value) ? "}" : "&" + safe(t.value);
+                } else {
+                    out = "@" + safe(t.value);
+                }
+                break;
+            case REF: {
+                String rt = refTypeString(t);
+                boolean isChild = (t.isChild == 1) && !containsSlash(t.value);
+                String maybeChild = isChild ? "&" : "";
+                if ("I".equals(rt)) {
+                    out = (endsWithLambda(t.value) || t.value.matches("\\d+_LAMBDA")) ? "{" : (maybeChild + safe(t.value));
+                } else {
+                    out = rt + maybeChild + safe(t.value);
+                }
+                break;
+            }
+            case INSTR:
+                out = safe(t.value) + (t.size == 2 ? "2" : "") + (t.stack == 1 ? "r" : "") + (t.keep == 1 ? "k" : "");
+                break;
+            case LIT:
+                out = "#" + toHexBytes(t.value, (t.size == 2 ? 2 : 1));
+                break;
+            case RAW:
+                out = toHexBytes(t.value, (t.size == 2 ? 2 : 1));
+                break;
+            case ADDR:
+                out = "|" + toHexBytes(t.value, 2) + " ";
+                break;
+            case PAD: {
+                long n = parseNumber(t.value);
+                out = "$" + Long.toHexString(n);
+                break;
+            }
+            case STR:
+            case INCLUDE:
+                out = safe(t.value);
+                break;
+            case EMPTY:
+                out = "";
+                break;
+            default:
+                out = t.type + "(" + safe(t.value) + ")";
+        }
+        int __li = tokenLine(t);
+        if (withIndex && __li >= 0) out += "[" + __li + "]";
+        return out;
+    }
+
+    //Simple linear token list printer 
     public static String prettyPrintTokens(List<Token> tokens, boolean showIndices, int maxPerLine) {
         if (tokens == null || tokens.isEmpty()) return "[]";
         StringBuilder sb = new StringBuilder();
@@ -74,116 +218,137 @@ public class PrettyPrint {
         return sb.toString().trim();
     }
 
-    // 高级格式化，美化打印 tokens（支持分组、类型显示、缩进）
-    public static String prettyPrint(List<Token> tokens, boolean showTypes, boolean showIndices, boolean groupByType, int maxPerLine, String indent) {
-        if (tokens == null || tokens.isEmpty()) return "No tokens";
-        if (groupByType) return prettyPrintGrouped(tokens, showTypes, showIndices, indent);
-
-        StringBuilder sb = new StringBuilder();
-        int count = 0;
-        String currentIndent = "";
-        for (int i = 0; i < tokens.size(); i++) {
-            Token token = tokens.get(i);
-            String printed = prettyPrintToken(token, showIndices);
-            if (showTypes) {
-                printed = token.type + ":" + printed;
-            }
-            // 按类型缩进
-            if (token.type == TokenType.ADDR || (token.type == TokenType.LABEL && token.size == 2)) {
-                if (count > 0) sb.append("\n");
-                currentIndent = "";
-            } else if (token.type == TokenType.LABEL && token.size == 1) {
-                if (count > 0) sb.append("\n");
-                currentIndent = indent;
-            }
-            sb.append(currentIndent).append(printed).append(" ");
-            count++;
-            if (maxPerLine > 0 && count % maxPerLine == 0) sb.append("\n");
-        }
-        return sb.toString().trim();
-    }
-
-    // 按类型分组打印 
+    //Grouped by token type 
     public static String prettyPrintGrouped(List<Token> tokens, boolean showTypes, boolean showIndices, String indent) {
         Map<TokenType, List<Token>> groups = new LinkedHashMap<>();
-        for (Token token : tokens) {
-            groups.computeIfAbsent(token.type, k -> new ArrayList<>()).add(token);
-        }
+        for (Token token : tokens) groups.computeIfAbsent(token.type, k -> new ArrayList<>()).add(token);
         StringBuilder sb = new StringBuilder();
-        for (Map.Entry<TokenType, List<Token>> entry : groups.entrySet()) {
-            sb.append(entry.getKey()).append(" (").append(entry.getValue().size()).append("):\n");
-            for (Token token : entry.getValue()) {
-                sb.append(indent).append(prettyPrintToken(token, showIndices)).append("\n");
-            }
+        for (Map.Entry<TokenType, List<Token>> e : groups.entrySet()) {
+            sb.append(e.getKey()).append(" (").append(e.getValue().size()).append("):\n");
+            for (Token token : e.getValue()) sb.append(indent).append(prettyPrintToken(token, showIndices)).append("\n");
             sb.append("\n");
         }
         return sb.toString();
     }
 
-    // UXN状态美化
+    //UxnState helpers 
+
     public static String prettyPrintUxnState(UxnState uxn) {
         StringBuilder sb = new StringBuilder();
         sb.append("=== UXN State ===\n");
-        sb.append("PC: 0x").append(toHex(uxn.pc, 4)).append("\n");
-        sb.append("Free: 0x").append(toHex(uxn.free, 4)).append("\n");
+        sb.append("PC: 0x").append(toHexBytes(uxn.pc, 2)).append("\n");
+        sb.append("Free: 0x").append(toHexBytes(uxn.free, 2)).append("\n");
         sb.append("Has Main: ").append(uxn.hasMain).append("\n");
-        sb.append("Working Stack (").append(uxn.stackPtr[0]).append("): ").append(uxn.stacksToString(0)).append("\n");
-        sb.append("Return Stack (").append(uxn.stackPtr[1]).append("): ").append(uxn.stacksToString(1)).append("\n");
-        sb.append("Labels: ").append(uxn.symbolTable.Labels.size())
-                .append(", References: ").append(uxn.symbolTable.Refs.size()).append("\n");
-        int usedMemory = uxn.free, totalMemory = 0x10000;
-        double usagePercent = totalMemory == 0 ? 0 : (usedMemory * 100.0 / totalMemory);
-        sb.append("Memory: ").append(usedMemory).append("/").append(totalMemory)
-                .append(" (").append(String.format("%.2f", usagePercent)).append("%)\n");
+        try {
+            sb.append("Working Stack (").append(uxn.stackPtr[0]).append("): ").append(uxn.stacksToString(0)).append("\n");
+            sb.append("Return Stack (").append(uxn.stackPtr[1]).append("): ").append(uxn.stacksToString(1)).append("\n");
+        } catch (Throwable ignore) { }
+        // Avoid depending on symbolTable internals to keep this generic
         return sb.toString();
     }
 
-    // UXN内存转储 
     public static String prettyPrintMemory(UxnState uxn, int start, int end) {
         if (end <= start) end = Math.min(uxn.free, start + 256);
         StringBuilder sb = new StringBuilder();
-        sb.append("=== Memory Dump (0x").append(toHex(start, 4)).append(" - 0x")
-                .append(toHex(end, 4)).append(") ===\n");
+        sb.append("=== Memory Dump (0x").append(toHexBytes(start, 2)).append(" - 0x").append(toHexBytes(end, 2)).append(") ===\n");
         for (int addr = start; addr < end; addr += 16) {
             StringBuilder lineBytes = new StringBuilder();
             StringBuilder lineChars = new StringBuilder();
             for (int i = 0; i < 16 && addr + i < end; i++) {
-                Object tokenObj = uxn.memory[addr + i];
                 int byteVal = 0;
-                if (tokenObj instanceof Token) {
-                    String val = ((Token) tokenObj).value;
-                    try { byteVal = Integer.parseInt(val, 16); } catch (Exception ignore) {}
-                } else if (tokenObj instanceof Integer) {
-                    byteVal = (int) tokenObj;
+                Object cell = uxn.memory[addr + i];
+                if (cell instanceof Token) {
+                    String val = ((Token) cell).value;
+                    byteVal = (int) (parseNumber(val) & 0xFF);
+                } else if (cell instanceof Integer) {
+                    byteVal = (Integer) cell;
                 }
-                lineBytes.append(toHex(Integer.toString(byteVal), 2)).append(" ");
-                lineChars.append((byteVal >= 32 && byteVal <= 126) ? (char)byteVal : '.');
+                lineBytes.append(toHexBytes(byteVal, 1)).append(" ");
+                lineChars.append((byteVal >= 32 && byteVal <= 126) ? (char) byteVal : '.');
             }
-            sb.append(toHex(addr, 4)).append(": ")
-                    .append(String.format("%-47s", lineBytes)).append(" |").append(lineChars).append("|\n");
+            sb.append(toHexBytes(addr, 2)).append(": ")
+              .append(String.format("%-47s", lineBytes)).append(" |")
+              .append(lineChars).append("|\n");
         }
         return sb.toString();
+        }
+
+    //Helpers
+
+   
+    private static int tokenLine(Token t) {
+        try {
+            java.lang.reflect.Field f = Token.class.getDeclaredField("line");
+            f.setAccessible(true);
+            return f.getInt(t);
+        } catch (Throwable ignore) {
+            return -1;
+        }
     }
 
-    //进制字符串辅助 
-    public static String toHex(String val, int sz) {
-        int n;
+    private static String refTypeString(Token t) {
         try {
-            if (val.matches("^-?\\d+$")) {
-                n = Integer.parseInt(val);
-            } else {
-                n = Integer.parseInt(val, 16);
-            }
-        } catch (NumberFormatException e) {
-            n = 0;
-        }
-        int szx2 = sz;
-        if (n < 0) n = (int)(Math.pow(2, sz * 4) + n);
-        return String.format("%0" + szx2 + "x", n);
+            if (t.refType >= 0 && t.refType < Definitions.REV_REF_TYPES.length)
+                return Definitions.REV_REF_TYPES[t.refType];
+        } catch (Throwable ignore) { }
+        return "?";
     }
-    public static String toHex(int val, int sz) {
-        int n = val;
-        if (n < 0) n = (int)(Math.pow(2, sz * 4) + n);
-        return String.format("%0" + sz + "x", n);
+
+    private static boolean containsSlash(String s) {
+        return s != null && s.indexOf('/') >= 0;
+    }
+
+    private static boolean endsWithLambda(String s) {
+        return s != null && s.endsWith("_LAMBDA");
+    }
+
+    private static String safe(String s) {
+        return s == null ? "" : s;
+    }
+
+    //Parse decimal or hex string, trimming optional _N suffix
+    private static long parseNumber(String s) {
+        if (s == null || s.isEmpty()) return 0L;
+        String v = s;
+        int us = v.lastIndexOf('_');
+        if (us > 0 && us == v.length() - 2 && Character.isDigit(v.charAt(us + 1))) {
+            v = v.substring(0, us); // drop _N suffix
+        }
+        try {
+            if (v.matches("^-?\\d+$")) return Long.parseLong(v);
+            return Long.parseLong(v, 16);
+        } catch (Exception e) {
+            return 0L;
+        }
+    }
+
+    //format as hex with a given byte width 
+    public static String toHexBytes(long n, int bytes) {
+        long mod = 1L << (bytes * 8);
+        if (n < 0) n = (n + mod) & (mod - 1);
+        int digits = bytes * 2;
+        return String.format("%0" + digits + "x", n & (mod - 1));
+    }
+
+    //Overload: parse then format with byte width
+    public static String toHexBytes(String val, int bytes) {
+        return toHexBytes(parseNumber(val), bytes);
+    }
+
+    //Compatibility with prior code 
+
+    //Prior code used digit width; keep a wrapper for compatibility
+    public static String toHex(String val, int digits) {
+        long n = parseNumber(val);
+        long mod = 1L << (digits * 4);
+        if (n < 0) n = (n + mod) & (mod - 1);
+        return String.format("%0" + digits + "x", n & (mod - 1));
+    }
+
+    public static String toHex(int val, int digits) {
+        long n = val;
+        long mod = 1L << (digits * 4);
+        if (n < 0) n = (n + mod) & (mod - 1);
+        return String.format("%0" + digits + "x", n & (mod - 1));
     }
 }

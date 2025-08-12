@@ -1,261 +1,387 @@
-// package yaku.uxntal;
+package yaku.uxntal;
+import yaku.uxntal.units.UxnState;
 
-// import java.util.*;
-// import static yaku.uxntal.Definitions.*;
-
-// public class ErrorChecker {
-
-//     public static class Error {
-//         public final int line;
-//         public final String message;
-
-//         public Error(int line, String message) {
-//             this.line = line;
-//             this.message = message;
-//         }
-
-//         @Override
-//         public String toString() {
-//             return "第 " + line + " 行: " + message;
-//         }
-//     }
-
-//     public List<Error> check(List<Token> tokens) {
-//         List<Error> errors = new ArrayList<>();
-//         Set<String> definedLabels = new HashSet<>();
-//         Set<String> referencedLabels = new HashSet<>();
-//         Set<String> duplicateLabels = new HashSet<>();
-
-//         // 1. 记录所有定义和引用的标签，并检测指令合法性
-//         for (Token t : tokens) {
-//             switch (t.type) {
-//                 case LABEL:
-//                     if (definedLabels.contains(t.value)) {
-//                         errors.add(new Error(t.line, "标签重复定义: " + t.value));
-//                         duplicateLabels.add(t.value);
-//                     } else {
-//                         definedLabels.add(t.value);
-//                     }
-//                     break;
-//                 case REF:
-//                     referencedLabels.add(t.value);
-//                     break;
-//                 case INSTR:
-//                     if (!Definitions.isOpcode(t.value)) {
-//                         errors.add(new Error(t.line, "未知指令: " + t.value));
-//                     }
-//                     break;
-//                 case LIT:
-//                     try {
-//                         Integer.parseInt(t.value, 16); // 检查十六进制数是否合法
-//                     } catch (NumberFormatException ex) {
-//                         errors.add(new Error(t.line, "非法常量: " + t.value));
-//                     }
-//                     break;
-//                 default:
-//                     // 其它类型暂不处理
-//                     break;
-//             }
-//         }
-
-//         // 2. 检查未定义引用
-//         for (String ref : referencedLabels) {
-//             if (!definedLabels.contains(ref)) {
-//                 // 找到第一处引用位置
-//                 int refLine = tokens.stream()
-//                         .filter(t -> t.type == TokenType.REF && t.value.equals(ref))
-//                         .findFirst()
-//                         .map(t -> t.line)
-//                         .orElse(-1);
-//                 errors.add(new Error(refLine, "引用了未定义的标签: " + ref));
-//             }
-//         }
-
-//         return errors;
-//     }
-// }
+import java.util.*;
+import java.util.regex.Pattern;
 
 
-// package yaku.uxntal;
+public final class ErrorChecker {
 
-// import java.util.*;
-// import static yaku.uxntal.Definitions.*;
+    private ErrorChecker() {}
 
-// public class ErrorChecker {
+    //Public API
 
-//     public static class Error {
-//         public final int line;
-//         public final String message;
-//         public Error(int line, String message) {
-//             this.line = line;
-//             this.message = message;
-//         }
-//         @Override
-//         public String toString() { return "第 " + line + " 行: " + message; }
-//     }
+    // 主入口：执行静态检查；发现错误则抛出异常
+    public static void checkErrors(List<Token> tokens, UxnState uxn) {
+        if (tokens == null) throw new IllegalArgumentException("tokens == null");
+        if (uxn == null)    throw new IllegalArgumentException("uxn == null");
 
-//     public static class Warning {
-//         public final int line;
-//         public final String message;
-//         public Warning(int line, String message) {
-//             this.line = line;
-//             this.message = message;
-//         }
-//         @Override
-//         public String toString() { return "第 " + line + " 行: " + message; }
-//     }
+        // 构建（或刷新）分配表
+        buildAllocationTable(tokens, uxn);
 
-//     // 辅助结构体用于分配表
-//     public static class AllocationInfo {
-//         public String name;
-//         public int size;
-//         public AllocationInfo(String name, int size) {
-//             this.name = name; this.size = size;
-//         }
-//     }
+        String currentParent = "";
+        List<String> errors   = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
 
-//     // 主错误检查方法
-//     public void check(List<Token> tokens) {
-//         Map<String, Integer> allocationTable = buildAllocationTable(tokens);
-//         boolean foundMain = false;
-//         List<Error> errors = new ArrayList<>();
-//         List<Warning> warnings = new ArrayList<>();
-//         String currentParent = "";
-//         for (int i = 0; i < tokens.size(); i++) {
-//             Token token = tokens.get(i);
-//             Token next = (i+1 < tokens.size()) ? tokens.get(i+1) : new Token(TokenType.EMPTY, "", 0);
-//             Token prev = (i-1 >= 0) ? tokens.get(i-1) : new Token(TokenType.EMPTY, "", 0);
+        boolean inZeroPage = true; // 遇到 MAIN 或 |0100 后退出零页
 
-//             // 检查是否有MAIN（入口）
-//             if (token.type == TokenType.MAIN) foundMain = true;
+        for (int idx = 0; idx < tokens.size(); idx++) {
+            Token tok  = tokens.get(idx);
+            Token next = (idx + 1 < tokens.size()) ? tokens.get(idx + 1) : makeEmpty();
+            Token prev = (idx - 1 >= 0) ? tokens.get(idx - 1) : null;
 
-//             // 1. 零页raw检查（只有main未找到时才有意义）
-//             if (!foundMain && token.type == TokenType.RAW) {
-//                 errors.add(new Error(token.line, "禁止在零页(raw values in the zero page): " + token));
-//             }
-//             // 2. 检查LIT/RAW紧跟LD/ST指令
-//             if ((token.type == TokenType.LIT || token.type == TokenType.RAW) &&
-//                 next.type == TokenType.INSTR &&
-//                 next.value.matches("(LD|ST)[ARZ]")) {
-//                 errors.add(new Error(token.line, "常量紧跟 load/store 指令: " + token + " " + next));
-//             }
-//             // 3. 父标签跟踪
-//             if (token.type == TokenType.LABEL && token.size == 2) {
-//                 currentParent = token.value;
-//             }
-//             // 4. 引用类型与模式匹配、分配表相关
-//             if (token.type == TokenType.REF) {
-//                 // 检查引用与LD/ST模式匹配
-//                 if (next.type == TokenType.INSTR && next.value.matches("(LD|ST)[ARZ]")) {
-//                     char aMode = next.value.charAt(next.value.length() - 1);
-//                     String[] accessMode = {"Z", "R", "A", "Z", "R", "A", ""};
-//                     // refType: . , ; - _ =
-//                     if (aMode != accessMode[token.refType].charAt(0)) {
-//                         errors.add(new Error(next.line, "指令寻址模式与引用模式不兼容: " + next + " / " + token));
-//                     }
-//                     // 检查分配表
-//                     String name = (token.isChild == 1 && !currentParent.isEmpty()) ? currentParent + "/" + token.value : token.value;
-//                     int allocSz = allocationTable.getOrDefault(name, 0);
-//                     int wordSz = next.size;
-//                     if (token.refType < 3) { // 只对 .,; 检查分配表
-//                         if (allocSz == 0) {
-//                             errors.add(new Error(next.line, "未分配空间的引用: " + next + " / " + token + " <" + name + ">"));
-//                         } else if (allocSz < wordSz) {
-//                             errors.add(new Error(next.line, "分配为1字节，实际访问为2字节: " + next + " / " + token));
-//                         } else if (allocSz > wordSz && allocSz == 2) {
-//                             warnings.add(new Warning(next.line, "分配比实际访问大（如分配2字节访问1字节）: " + next + " / " + token));
-//                         }
-//                         // ST 指令 + 常量，检查大小
-//                         if (next.value.startsWith("ST") && prev.type == TokenType.LIT) {
-//                             if (prev.size > allocSz) {
-//                                 warnings.add(new Warning(next.line, "分配空间小于常量大小: " + prev + " " + token + " " + next));
-//                             }
-//                             if (prev.size != wordSz) {
-//                                 warnings.add(new Warning(next.line, "存储与常量大小不一致: " + prev + " " + token + " " + next));
-//                             }
-//                         }
-//                     }
-//                 }
-//                 // JMP/JCN/JSR与引用模式匹配
-//                 else if (next.type == TokenType.INSTR && next.value.matches("(JMP|JCN|JSR)")) {
-//                     if (token.refType == 1 && next.size != 1) {
-//                         errors.add(new Error(next.line, "跳转引用模式与指令大小不兼容: " + next + " / " + token));
-//                     } else if (token.refType == 2 && next.size != 2) {
-//                         errors.add(new Error(next.line, "跳转引用模式与指令大小不兼容: " + next + " / " + token));
-//                     }
-//                 }
-//             }
-//             // 5. SFT 检查
-//             if (token.type == TokenType.LIT &&
-//                 next.type == TokenType.INSTR &&
-//                 "SFT".equals(next.value)) {
-//                 if (token.size == 2) {
-//                     errors.add(new Error(token.line, "SFT第二参数必须是byte: " + prev + " " + token + " " + next));
-//                 }
-//                 if ((prev.type == TokenType.LIT || (prev.type == TokenType.INSTR && prev.value.startsWith("LD"))) &&
-//                     prev.size != next.size) {
-//                     warnings.add(new Warning(token.line, "SFT模式与前一参数大小不一致: " + prev + " " + token + " " + next));
-//                 }
-//             }
-//         }
-//         // 输出警告与错误
-//         for (Warning w : warnings) {
-//             System.err.println("Warning: " + w);
-//         }
-//         for (Error e : errors) {
-//             System.err.println("Error: " + e);
-//         }
-//         // 有错误直接终止
-//         if (!errors.isEmpty()) throw new RuntimeException("汇编检测发现错误，见上方Error信息！");
-//     }
+            // 离开零页的两个条件：MAIN 或 |0100
+            if (tok.type == Definitions.TokenType.MAIN) {
+                inZeroPage = false;
+            }
+            if (tok.type == Definitions.TokenType.ADDR &&
+                "0100".equalsIgnoreCase(safe(tok.value))) {
+                inZeroPage = false;
+            }
 
-//     // 构建分配表（按perl buildAllocationTable方式实现）
-//     public static Map<String, Integer> buildAllocationTable(List<Token> tokens) {
-//         Map<String, Integer> alloc = new HashMap<>();
-//         String currentParent = "";
-//         String currentCfqn = "";
-//         String prevConsecutiveLabel = "";
-//         for (int i = 0; i < tokens.size(); i++) {
-//             Token token = tokens.get(i);
-//             Token next = (i+1 < tokens.size()) ? tokens.get(i+1) : new Token(TokenType.EMPTY, "", 0);
-//             if (token.type == TokenType.LABEL) {
-//                 if (token.size == 2) { // parent
-//                     currentParent = token.value;
-//                     currentCfqn = "";
-//                 } else { // child
-//                     currentCfqn = currentParent + "/" + token.value;
-//                 }
-//                 if (next.type == TokenType.PAD) { // $ 分配
-//                     if (!currentCfqn.isEmpty()) {
-//                         alloc.put(currentCfqn, Integer.parseInt(next.value, 16));
-//                     } else {
-//                         alloc.put(currentParent, Integer.parseInt(next.value, 16));
-//                     }
-//                 } else if (next.type == TokenType.RAW) { // raw分配
-//                     if (!currentCfqn.isEmpty()) {
-//                         alloc.put(currentCfqn, next.size);
-//                     } else {
-//                         alloc.put(currentParent, next.size);
-//                     }
-//                 } else if (next.type == TokenType.LABEL) {
-//                     prevConsecutiveLabel = (token.size == 2) ? currentParent : currentCfqn;
-//                     continue;
-//                 } else {
-//                     if (!currentCfqn.isEmpty()) {
-//                         alloc.put(currentCfqn, 0);
-//                     } else {
-//                         alloc.put(currentParent, 0);
-//                     }
-//                 }
-//                 if (!prevConsecutiveLabel.isEmpty()) {
-//                     if (!currentCfqn.isEmpty())
-//                         alloc.put(prevConsecutiveLabel, alloc.getOrDefault(currentCfqn, 0));
-//                     else
-//                         alloc.put(prevConsecutiveLabel, alloc.getOrDefault(currentParent, 0));
-//                     prevConsecutiveLabel = "";
-//                 }
-//             }
-//         }
-//         return alloc;
-//     }
-// }
+            // 0) 零页 RAW 禁止
+            if (inZeroPage && tok.type == Definitions.TokenType.RAW) {
+                errors.add("Writing raw values in the zero page is not allowed: "
+                        + pp(tok) + line(tok));
+                continue;
+            }
+
+            // 1) 记录当前 @parent
+            if (tok.type == Definitions.TokenType.LABEL && tok.size == 2) {
+                currentParent = safe(tok.value);
+            }
+
+            // 2) 常量+访存相邻（与 Perl 规则一致）
+            if (tok.type == Definitions.TokenType.LIT
+                    && next.type == Definitions.TokenType.INSTR
+                    && isLdSt(base(next.value))) {
+                errors.add("Stack constant followed by load or store: "
+                        + ppPair(tok, next) + line(tok));
+                continue;
+            }
+            if (tok.type == Definitions.TokenType.RAW
+                    && next.type == Definitions.TokenType.INSTR
+                    && isLdSt(base(next.value))) {
+                errors.add("Raw constant followed by load or store: "
+                        + ppPair(tok, next) + line(tok));
+                continue;
+            }
+
+            // 3) REF 相关检查
+            if (tok.type == Definitions.TokenType.REF) {
+
+                // 子引用但没有父标签：警告
+                if (isChildRef(tok) && currentParent.isEmpty()) {
+                    warnings.add("Child reference without a parent label: "
+                            + pp(tok) + line(tok));
+                }
+
+                if (next.type == Definitions.TokenType.INSTR) {
+                    final String nb = base(next.value);
+
+                    // 3a) LD*/ST* 寻址模式兼容性 + 分配表尺寸检查
+                    if (isLdSt(nb)) {
+                        char aMode    = accessLetter(nb); // Z/R/A
+                        char expected = expectedFromRefType(tok.refType);
+                        if (expected != 0 && aMode != 0 && aMode != expected) {
+                            errors.add(pp(next) + " has address with incompatible reference mode "
+                                    + pp(tok) + line(tok));
+                        }
+
+                        // 只对 . , ; 做 allocation 检查
+                        if (tok.refType <= 2) {
+                            String name = (isChildRef(tok) && !currentParent.isEmpty())
+                                    ? currentParent + "/" + safe(tok.value)
+                                    : safe(tok.value);
+
+                            int allocSz = uxn.allocationTable.getOrDefault(name, 0);
+                            int wordSz  = Math.max(1, next.size); // 1=byte, 2=short
+
+                            if (allocSz == 0) {
+                                errors.add("No allocation for reference: "
+                                        + ppPair(tok, next) + line(next) + " <" + name + ">");
+                            } else if (allocSz < wordSz) {
+                                errors.add("Allocation is only a byte, access is a short: "
+                                        + ppPair(tok, next) + line(next));
+                            } else if (allocSz > wordSz && allocSz == 2) {
+                                warnings.add("Allocation is larger than access size: "
+                                        + ppPair(tok, next) + line(next));
+                            }
+
+                            // 存储时，和前一个 LIT 的大小对齐提示
+                            if (isStore(nb) && prev != null && prev.type == Definitions.TokenType.LIT) {
+                                if (prev.size > allocSz) {
+                                    warnings.add("Allocation size smaller than size of constant to be stored: "
+                                            + ppTriple(prev, tok, next) + line(next));
+                                }
+                                if (prev.size != wordSz) {
+                                    warnings.add("Store size different from size of constant to be stored: "
+                                            + ppTriple(prev, tok, next) + line(next));
+                                }
+                            }
+                        }
+                    }
+
+                    // 3b) 跳转宽度兼容（JMP/JCN/JSR）
+                    if (isJump(nb)) {
+                        if (tok.size == 1 && next.size != 1) {
+                            errors.add(pp(next) + " has address with incompatible reference mode "
+                                    + pp(tok) + line(tok));
+                        } else if (tok.size == 2 && next.size != 2) {
+                            errors.add(pp(next) + " has address with incompatible reference mode "
+                                    + pp(tok) + line(tok));
+                        }
+                    }
+                }
+            }
+
+            // 4) SFT 检查：第二个参数必须是 byte；short-mode 与第一个参数兼容
+            if (tok.type == Definitions.TokenType.LIT
+                    && next.type == Definitions.TokenType.INSTR
+                    && "SFT".equals(base(next.value))) {
+
+                if (tok.size == 2) {
+                    errors.add("Second argument of SFT must be a byte: "
+                            + ppTriple(prev, tok, next) + line(tok));
+                }
+
+                if (prev != null
+                        && (prev.type == Definitions.TokenType.LIT
+                        || (prev.type == Definitions.TokenType.INSTR && base(prev.value).startsWith("LD")))
+                        && prev.size != next.size) {
+                    // 仅告警，非致命
+                    warnings.add("SFT short mode not compatible with size of first argument: "
+                            + ppTriple(prev, tok, next) + line(tok));
+                }
+            }
+        }
+
+        //输出告警（可能升级为错误）
+        if (!warnings.isEmpty()) {
+            for (String w : warnings) {
+                if (!Flags.NSW || !w.contains("stack")) { // 可以按需细化 -S 的屏蔽范围
+                    System.err.println("Warning: " + w);
+                    if (Flags.EE && Flags.FF) {
+                        throw new RuntimeException("Warnings treated as errors (EE) and stop on first (FF).");
+                    }
+                }
+            }
+            if (Flags.EE) {
+                throw new RuntimeException("Warnings treated as errors (EE).");
+            }
+        }
+
+        // 输出错误
+        if (!errors.isEmpty()) {
+            for (String e : errors) {
+                System.err.println("Error: " + e);
+                if (Flags.FF) {
+                    throw new RuntimeException("Stop on first error (FF).");
+                }
+            }
+            throw new RuntimeException("There were errors.");
+        }
+    }
+
+    /**
+     * 构建 allocation 表：@parent / &child + PAD/RAW
+     * - PAD: 按 Encoder 对齐，分配为 (value + 1)
+     * - RAW: 分配为 max(1, size)
+     * - 连续标签（@a &b &c $2）用队列一次性回填同一 allocation
+     */
+    public static UxnState buildAllocationTable(List<Token> tokens, UxnState uxn) {
+        if (uxn.allocationTable == null) {
+            uxn.allocationTable = new HashMap<>();
+        } else {
+            uxn.allocationTable.clear();
+        }
+
+        String currentParent = "";
+        String currentCFQN   = "";
+        Deque<String> pending = new ArrayDeque<>();
+
+        for (int i = 0; i < tokens.size(); i++) {
+            Token t = tokens.get(i);
+            Token next = (i + 1 < tokens.size()) ? tokens.get(i + 1) : makeEmpty();
+
+            if (t.type == Definitions.TokenType.LABEL) {
+                // 计算当前 label 的规范名
+                if (t.size == 2) { // @parent
+                    currentParent = safe(t.value);
+                    currentCFQN = "";
+                } else {           // &child
+                    String child = safe(t.value);
+                    currentCFQN = currentParent.isEmpty() ? child : currentParent + "/" + child;
+                }
+                String curName = !currentCFQN.isEmpty() ? currentCFQN : currentParent;
+
+                // 连续标签，挂起等待下一条分配语句
+                if (next.type == Definitions.TokenType.LABEL) {
+                    pending.addLast(curName);
+                    continue;
+                }
+
+                int alloc = 0;
+                if (next.type == Definitions.TokenType.PAD) {
+                    alloc = parseInt(next.value, 0) + 1; // 与 Encoder 对齐
+                } else if (next.type == Definitions.TokenType.RAW) {
+                    alloc = Math.max(1, next.size);
+                } else {
+                    alloc = 0; // 声明但未分配
+                }
+
+                putAlloc(curName, alloc, uxn.allocationTable);
+                while (!pending.isEmpty()) putAlloc(pending.removeFirst(), alloc, uxn.allocationTable);
+            }
+        }
+        return uxn;
+    }
+
+    //Line helpers
+
+    
+    public static String getLineForToken(Token token, UxnState uxn) {
+        return line(token);
+    }
+
+   
+    public static Map<String, List<Integer>> getLinesForTokens(String programText) {
+        Map<String, List<Integer>> map = new HashMap<>();
+        if (programText == null) return map;
+
+        String[] lines = programText.split("\\R");
+        int lineIdx = 1;
+        for (String raw : lines) {
+            String line = raw.replaceAll("\\s*\\(.+?\\)\\s*$", ""); // 去行尾 ( ... ) 注释
+            if (line.isEmpty()) { lineIdx++; continue; }
+
+            String[] toks = line.trim().split("\\s+");
+            for (String t : toks) {
+                if (t.startsWith("\"")) {
+                    String s = t.substring(1);
+                    for (int j = 0; j < s.length(); j++) {
+                        String hx = String.format("%02x", (int) s.charAt(j));
+                        map.computeIfAbsent(hx, k -> new ArrayList<>()).add(lineIdx);
+                    }
+                } else {
+                    map.computeIfAbsent(t, k -> new ArrayList<>()).add(lineIdx);
+                }
+            }
+            lineIdx++;
+        }
+        return map;
+    }
+
+    //Internal helpers
+
+    private static String safe(String s) { return s == null ? "" : s; }
+
+    private static boolean isChildRef(Token t) {
+        // 你的 Token 中：REF 的 stack==1 通常表示子引用；若有 isChild 字段也可一起判
+        return t != null && t.type == Definitions.TokenType.REF && (t.stack == 1 || getIsChildSafely(t) == 1);
+    }
+    private static int getIsChildSafely(Token t) {
+        try {
+            java.lang.reflect.Field f = t.getClass().getDeclaredField("isChild");
+            f.setAccessible(true);
+            Object v = f.get(t);
+            return (v instanceof Integer) ? (Integer) v : 0;
+        } catch (Exception ignore) { return 0; }
+    }
+
+    private static String base(String instr) {
+        if (instr == null) return "";
+        return instr.replaceAll("\\d+$", ""); // 去掉末尾 '2'
+    }
+
+    private static boolean isLdSt(String b) {
+        return b.startsWith("LD") || (b.startsWith("ST") && !b.startsWith("STH"));
+    }
+
+    private static boolean isStore(String b) {
+        return b.startsWith("ST") && !b.startsWith("STH");
+    }
+
+    private static boolean isJump(String b) {
+        return b.equals("JMP") || b.equals("JCN") || b.equals("JSR");
+    }
+
+    private static char accessLetter(String b) {
+        // 形如 "LDA", "LDZ", "LDR", "STA", "STR", "STZ"
+        return (b.length() >= 3) ? b.charAt(2) : 0;
+    }
+
+    private static char expectedFromRefType(int refType) {
+        // 0..5: . , ; - _ = ;  6: immediate/none
+        final char[] accessMode = new char[]{'Z','R','A','Z','R','A', 0};
+        if (refType >= 0 && refType < accessMode.length) return accessMode[refType];
+        return 0;
+    }
+
+    private static Token makeEmpty() {
+        return new Token(Definitions.TokenType.EMPTY, "0", 0);
+    }
+
+    private static int parseInt(String s, int def) {
+        if (s == null) return def;
+        try {
+            if (HEX.matcher(s).matches()) {
+                String v = s.startsWith("0x") || s.startsWith("0X") ? s.substring(2) : s;
+                return Integer.parseInt(v, 16);
+            }
+            return Integer.parseInt(s);
+        } catch (Exception e) {
+            return def;
+        }
+    }
+
+    private static String pp(Token t) {
+        if (t == null) return "<null>";
+        switch (t.type) {
+            case LABEL: return (t.size == 2 ? "@" : "&") + safe(t.value);
+            case REF:   return refPunct(t.refType) + safe(t.value);
+            case LIT:   return safe(t.value);
+            case INSTR: return safe(t.value);
+            case RAW:   return safe(t.value);
+            case PAD:   return "$" + safe(t.value);
+            case ADDR:  return "|" + safe(t.value);
+            default:    return t.type.name() + ":" + safe(t.value);
+        }
+    }
+
+    private static String ppPair(Token a, Token b) {
+        return "[" + pp(a) + " " + pp(b) + "]";
+    }
+
+    private static String ppTriple(Token a, Token b, Token c) {
+        String sa = (a == null) ? "" : pp(a) + " ";
+        return "[" + sa + pp(b) + " " + pp(c) + "]";
+    }
+
+    private static String refPunct(int refType) {
+        switch (refType) {
+            case 0: return ".";
+            case 1: return ",";
+            case 2: return ";";
+            case 3: return "-";
+            case 4: return "_";
+            case 5: return "=";
+            case 6: return ""; // immediate/none
+            default: return "";
+        }
+    }
+
+    private static String line(Token t) {
+        if (t == null || t.lineNum <= 0) return "";
+        return " on line " + t.lineNum;
+    }
+
+    private static void putAlloc(String name, int size, Map<String,Integer> tbl) {
+        if (name == null || name.isEmpty()) return;
+        // 如果想要“重复标签”报错/警告，可在此处加判断
+        // if (tbl.containsKey(name)) { ... }
+        tbl.put(name, size);
+    }
+
+    private static final Pattern HEX = Pattern.compile("^(?:0x)?[0-9a-fA-F]+$");
+}

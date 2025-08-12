@@ -4,87 +4,164 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 
-
 public class Assembler {
 
+   
+    //将内存导出成 ROM，去掉多余 0 填充
+    public static byte[] memToRom(byte[] memory, boolean writeRom, String romFile) throws Exception {
+        int romStart = 0x100; // 程序入口
+        int end = memory.length;
+
+        // 去掉尾部的零
+        while (end > romStart && memory[end - 1] == 0) {
+            end--;
+        }
+        byte[] trimmed = Arrays.copyOfRange(memory, romStart, end);
+
+        if (writeRom) {
+            Files.write(Paths.get(romFile), trimmed);
+            System.out.printf("[Assembler] ROM 写入完成：%s（大小 %d 字节）%n", romFile, trimmed.length);
+        } else {
+            System.out.printf("[Assembler] 测试模式：未写入 ROM（大小 %d 字节）%n", trimmed.length);
+        }
+        return trimmed;
+    }
+
+    //将内存导出成 ROM，带 free 边界，且从尾部反向剔除连续 0
+    public static byte[] memToRom(byte[] memory, int free, boolean writeRom, String romFile) throws Exception {
+        final int romStart = 0x100;
+        int end = Math.max(Math.min(free, memory.length), romStart);
+
+        // 仅裁剪 romStart..end，再从尾部反向剔除 0
+        int tail = end;
+        while (tail > romStart && memory[tail - 1] == 0) tail--;
+
+        byte[] trimmed = Arrays.copyOfRange(memory, romStart, tail);
+
+        if (writeRom) {
+            Files.write(Paths.get(romFile), trimmed);
+            System.out.printf("[Assembler] ROM 写入完成：%s（大小 %d 字节）%n", romFile, trimmed.length);
+        } else {
+            System.out.printf("[Assembler] 测试模式：未写入 ROM（大小 %d 字节）%n", trimmed.length);
+        }
+        return trimmed;
+    }
 
   
+    // 从 Token 内存导出 ROM
+    public static byte[] memToRomFromTokens(List<Token> memoryTokens, int free, boolean writeRom, String romFile) throws Exception {
+        final int romStart = 0x100;
+        final int upper = Math.max(free, romStart);
 
-public static byte[] memToRom(byte[] memory, boolean writeRom, String romFile) throws Exception {
-    int romStart = 0x100; // 入口
-    int end = memory.length;
+        List<Byte> bytes = new ArrayList<>();
+        for (int i = romStart; i < upper; i++) {
+            Token tk = (i >= 0 && i < memoryTokens.size()) ? memoryTokens.get(i) : null;
+            bytes.add(tokenToBytePerlExact(tk));
+        }
 
-    // 去掉结尾多余的0
-    while (end > romStart && memory[end - 1] == 0) {
-        end--;
+        // 反向剔除尾部连续 0（Perl 同款策略）
+        int end = bytes.size();
+        while (end > 0 && bytes.get(end - 1) == 0) end--;
+        byte[] trimmed = new byte[end];
+        for (int i = 0; i < end; i++) trimmed[i] = bytes.get(i);
+
+        if (writeRom) {
+            Files.write(Paths.get(romFile), trimmed);
+            System.out.printf("[Assembler] ROM 写入完成：%s（大小 %d 字节）%n", romFile, trimmed.length);
+        } else {
+            System.out.printf("[Assembler] 测试模式：未写入 ROM（大小 %d 字节）%n", trimmed.length);
+        }
+        return trimmed;
     }
-    byte[] trimmed = Arrays.copyOfRange(memory, romStart, end);
-
-    if (writeRom) {
-        Files.write(Paths.get(romFile), trimmed);
-    }
-    return trimmed;
-}
-
 
     
+    //token→byte 规则
+    private static byte tokenToBytePerlExact(Token token) {
+        if (token == null) return 0;
+        if (token.type == Definitions.TokenType.INSTR) {
+            return instructionToBytePerlExact(token);
+        }
+       
+        Integer v = tryParseIntFlexible(token.value);
+        return (byte)((v != null ? v : 0) & 0xFF);
+    }
 
-    // Token -> 字节流
+    //指令编码 
+    private static byte instructionToBytePerlExact(Token tk) {
+        final String instr = tk.value.toUpperCase();   // 用完整助记符
+        final int shortBit = ((tk.size == 2 ? 1 : 0) << 5);
+        final int rBit     = ((tk.stack != 0 ? 1 : 0) << 6);
+        final int kBit     = ((tk.keep  != 0 ? 1 : 0) << 7);
 
+        // LIT 特判：0x80 + 模式位，不拼低5位
+        if ("LIT".equals(instr)) {
+            int b = 0x80 | shortBit | rBit | kBit;
+            return (byte)(b & 0xFF);
+        }
+
+        // J?I 特判：JCI/JMI/JSI 直接取 opcode 表值，忽略模式位
+        if ("JCI".equals(instr) || "JMI".equals(instr) || "JSI".equals(instr)) {
+            int op = Definitions.getOpcode(instr); // 需要 Definitions 提供该访问器
+            return (byte)(op & 0xFF);
+        }
+
+        // 普通指令：模式位 + (opcode & 0x1F)
+        int base = Definitions.getOpcode(instr); // 从 opcode 映射取值
+        int b = shortBit | rBit | kBit | (base & 0x1F);
+        return (byte)(b & 0xFF);
+    }
+
+    //宽容解析：0x.. / 两位十六进制 / 十进制
+    private static Integer tryParseIntFlexible(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        try {
+            if (t.startsWith("0x") || t.startsWith("0X")) {
+                return Integer.parseInt(t.substring(2), 16);
+            }
+            // 若是 2 位十六进制，也按十六进制试一次
+            if (t.matches("^[0-9a-fA-F]{2}$")) {
+                return Integer.parseInt(t, 16);
+            }
+            // 其他情况走十进制
+            return Integer.parseInt(t);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    
+    //将 Token 转成一个字节
     private static byte tokenToByte(Token token) {
         if (token == null) return 0;
         if (token.type == Definitions.TokenType.INSTR) {
             return instructionToByte(token);
         }
         try {
-            return (byte) (Integer.parseInt(token.value) & 0xFF);
+            return (byte) (Integer.parseInt(token.value, 16) & 0xFF);
         } catch (Exception e) {
             return 0;
         }
     }
 
-    // 解释型指令转编码
+    //指令编码
     private static byte instructionToByte(Token token) {
-        // 支持 LIT、JCI、JMI、JSI、BRK 特殊处理
-        String name = token.value.toUpperCase();
-        int shortMode = token.size;      // 通常 size==2 表示 short
-        int returnMode = token.stack;    // 按你的 token 结构
-        int keepMode = token.keep;
-
-        if (name.equals("LIT")) {
-            int instrByte = 0x80;
-            if (shortMode == 2) instrByte |= 0x20;
-            if (returnMode == 1) instrByte |= 0x40;
-            if (keepMode == 1) instrByte |= 0x80;
-            return (byte) instrByte;
-        }
-        if (name.equals("JCI")) return 0x20;
-        if (name.equals("JMI")) return 0x40;
-        if (name.equals("JSI")) return 0x60;
-        if (name.equals("BRK")) return 0x00;
-
-        // 普通指令（查 Definitions.OPCODE_MAP）
-        Integer baseOpcode = Definitions.OPCODE_MAP.get(name);
-        if (baseOpcode == null) {
-            throw new RuntimeException("未知指令: " + name + " (token: " + token + ")");
-        }
-        int instrByte = baseOpcode & 0x1F;
-        if (shortMode == 2) instrByte |= 0x20;
-        if (returnMode == 1) instrByte |= 0x40;
-        if (keepMode == 1) instrByte |= 0x80;
-        return (byte) instrByte;
+        String baseName = token.value.substring(0, Math.min(3, token.value.length())).toUpperCase(); // 防御性截断
+        boolean shortMode = token.size == 2;
+        boolean returnMode = token.stack != 0;
+        boolean keepMode = token.keep != 0;
+        return (byte) Definitions.getOpcodeByte(baseName, shortMode, returnMode, keepMode);
     }
 
-    //工具方法
-
-    // 去除尾部零字节
+  
+    //除尾部零字节
     private static byte[] trimTrailingZeros(byte[] bytes) {
         int endIndex = bytes.length - 1;
         while (endIndex >= 0 && bytes[endIndex] == 0) endIndex--;
         return Arrays.copyOf(bytes, endIndex + 1);
     }
 
-    // 十六进制转储
+    //十六进制转储
     public static String createHexDump(byte[] bytes, int bytesPerLine) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < bytes.length; i += bytesPerLine) {
@@ -107,7 +184,7 @@ public static byte[] memToRom(byte[] memory, boolean writeRom, String romFile) t
         return sb.toString();
     }
 
-    // ROM 校验
+    //ROM 校验 
     public static RomValidationResult validateRom(byte[] bytes) {
         List<String> errors = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
@@ -135,7 +212,7 @@ public static byte[] memToRom(byte[] memory, boolean writeRom, String romFile) t
         }
     }
 
-    // ROM 统计
+    //ROM 统计
     public static RomStats getRomStats(byte[] bytes) {
         RomStats stats = new RomStats();
         stats.totalBytes = bytes.length;
@@ -153,7 +230,7 @@ public static byte[] memToRom(byte[] memory, boolean writeRom, String romFile) t
         public int totalBytes, instructionBytes, dataBytes, zeroBytes, instructionCount;
     }
 
-    // ROM 比较
+    //ROM 比较 
     public static RomDiffResult compareRoms(byte[] rom1, byte[] rom2) {
         List<RomDiff> diffs = new ArrayList<>();
         int maxLen = Math.max(rom1.length, rom2.length);
@@ -179,7 +256,8 @@ public static byte[] memToRom(byte[] memory, boolean writeRom, String romFile) t
         public RomDiff(int addr, int b1, int b2) { address = addr; byte1 = b1; byte2 = b2; }
     }
 
-    //字节码流构造器
+   
+    //字节码构造器
     public static class BytecodeBuilder {
         private final List<Byte> bytes = new ArrayList<>();
         private final Map<String, Integer> labels = new HashMap<>();
@@ -198,13 +276,13 @@ public static byte[] memToRom(byte[] memory, boolean writeRom, String romFile) t
             return this;
         }
 
-        public BytecodeBuilder instruction(String instr, boolean shortMode, boolean returnMode, boolean keepMode) {
-            bytes.add(InstructionEncoder.encode(instr, shortMode, returnMode, keepMode));
+        public BytecodeBuilder instruction(String baseName, int size, int r, int k) {
+            bytes.add((byte) Definitions.getOpcodeByte(baseName, size, r, k));
             return this;
         }
 
         public BytecodeBuilder literal(int value, boolean isShort) {
-            instruction("LIT", isShort, false, false);
+            instruction("LIT", isShort ? 2 : 1, 0, 0);
             if (isShort) shortVal(value);
             else byteVal(value);
             return this;
@@ -257,33 +335,5 @@ public static byte[] memToRom(byte[] memory, boolean writeRom, String romFile) t
             public final String labelName; public final int position; public final boolean isShort;
             Patch(String labelName, int position, boolean isShort) { this.labelName = labelName; this.position = position; this.isShort = isShort; }
         }
-    }
-
-    //指令编码器
-    public static class InstructionEncoder {
-        public static byte encode(String instruction, boolean shortMode, boolean returnMode, boolean keepMode) {
-            switch (instruction.toUpperCase()) {
-                case "BRK": return 0x00;
-                case "LIT": return encodeLit(shortMode, returnMode, keepMode);
-                case "JCI": return 0x20;
-                case "JMI": return 0x40;
-                case "JSI": return 0x60;
-            }
-            Integer baseOpcode = Definitions.OPCODE_MAP.get(instruction.toUpperCase());
-            if (baseOpcode == null) throw new RuntimeException("Unknown instruction: " + instruction);
-            int code = baseOpcode & 0x1F;
-            if (shortMode) code |= 0x20;
-            if (returnMode) code |= 0x40;
-            if (keepMode) code |= 0x80;
-            return (byte) code;
-        }
-        public static byte encodeLit(boolean shortMode, boolean returnMode, boolean keepMode) {
-            int code = 0x80;
-            if (shortMode) code |= 0x20;
-            if (returnMode) code |= 0x40;
-            if (keepMode) code |= 0x80;
-            return (byte) code;
-        }
-        
     }
 }

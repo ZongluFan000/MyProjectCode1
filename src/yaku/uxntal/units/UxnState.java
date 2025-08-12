@@ -6,7 +6,7 @@ import java.util.*;
 
 
 /**
- * UXN Virtual Machine State Management (Java 版本)
+ * UXN Virtual Machine State Management
  * 管理虚拟机的内存、栈、符号表、寄存器等所有状态
  */
 public class UxnState {
@@ -53,14 +53,14 @@ public class UxnState {
         public Map<String, Object[]> Refs = new HashMap<>();   // ref -> [List<pc>, token]
     }
 
-    /** 构造函数，hasMain可选 */
+    //构造函数，hasMain可选 
     public UxnState() { this(0); }
     public UxnState(int hasMain) {
         this.hasMain = hasMain;
         reset();
     }
 
-    /** 重置状态 */
+    //重置状态
     public void reset() {
         for (int i = 0; i < 0x10000; i++) {
             // 按 Definitions.EMPTY_TOKEN 生成新的 Token
@@ -81,7 +81,7 @@ public class UxnState {
         linesForToken.clear();
     }
 
-    /** 栈操作 */
+    //栈操作 
     public void pushStack(int stackIndex, Object value) {
         if (stackPtr[stackIndex] >= 255)
             throw new RuntimeException("Stack " + stackIndex + " overflow");
@@ -106,12 +106,12 @@ public class UxnState {
         return stackPtr[stackIndex];
     }
 
-    /** 地址是否合法 */
+    //地址是否合法 
     public boolean isValidAddress(int address) {
         return address >= 0 && address < 0x10000;
     }
 
-    /** 内存读写 */
+    //内存读写
     public Token readMemory(int address) {
         if (!isValidAddress(address))
             throw new RuntimeException("Invalid memory address: " + address);
@@ -124,7 +124,7 @@ public class UxnState {
         memory[address] = token;
     }
 
-    /** 添加符号表项 */
+    //添加符号表项 
     public void addSymbol(String name, int address, Token token, boolean isLabel) {
         if (isLabel) {
             symbolTable.Labels.put(name, new Object[]{address, token});
@@ -136,23 +136,23 @@ public class UxnState {
         }
     }
 
-    /** 获取符号表项 */
+    //获取符号表项 
     public Object[] getSymbol(String name, boolean isLabel) {
         if (isLabel) return symbolTable.Labels.getOrDefault(name, null);
         else         return symbolTable.Refs.getOrDefault(name, null);
     }
 
-    /** 添加分配信息 */
+    //添加分配信息
     public void addAllocation(String name, int size) {
         allocationTable.put(name, size);
     }
 
-    /** 获取分配大小 */
+    //获取分配大小
     public int getAllocationSize(String name) {
         return allocationTable.getOrDefault(name, 0);
     }
 
-    /** 调试输出 */
+    //调试输出 
     public String debugUxnState() {
         StringBuilder sb = new StringBuilder();
         sb.append(String.format("PC: 0x%04X\n", pc));
@@ -177,7 +177,7 @@ public class UxnState {
         return parts.toString();
     }
 
-    /** 让外部直接访问工作栈/返回栈字符串 */
+    //让外部直接访问工作栈/返回栈字符串
     public String stacksToString(int which) {
         if (which == 0 || which == 1) {
             return stackToString(this.stacks[which]);
