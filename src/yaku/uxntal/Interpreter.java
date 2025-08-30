@@ -1,6 +1,9 @@
 package yaku.uxntal;
 
 import java.util.*;
+
+import yaku.uxntal.Definitions.TokenType;
+
 import static yaku.uxntal.Definitions.*;
 
 public class Interpreter {
@@ -8,38 +11,87 @@ public class Interpreter {
     public static final int MAX_INSTRUCTIONS = 1_000_000;
     private static final int MEM_MASK = 0xFFFF;
 
-    //Stack element
+    // -------- Stack element --------
     public static class StackElem {
         public final int value; // 0..0xFFFF
         public final int size;  // 1=byte, 2=short
         public StackElem(int value, int size) {
             this.value = value & (size == 2 ? 0xFFFF : 0xFF);
-            this.size = size;
+            this.size = (size == 2 ? 2 : 1);
         }
         @Override public String toString() {
-            return size == 2 ? String.format("%04x", value & 0xFFFF)
-                             : String.format("%02x", value & 0xFF);
+            String hex = (size == 2)
+                ? String.format("%04x", value & 0xFFFF)
+                : String.format("%02x", value & 0xFF);
+            return hex + ((size == 2) ? "s" : "b");
         }
     }
 
-    //VM state
+    // -------- VM state --------
     private final byte[] memory;
     private final List<Definitions.Token> tokens;
-    private final Map<Integer, Definitions.Token> reverseSymbolTable;
+    // 反向符号表的 value 类型可能是 Definitions.Token 或 Encoder.ReverseEntry
+    private final Map<Integer, ?> reverseSymbolTable;
 
     private final Deque<StackElem> workStack = new ArrayDeque<>();
     private final Deque<StackElem> returnStack = new ArrayDeque<>();
-    @SuppressWarnings("unchecked")
-    private final Deque<StackElem>[] stacks = new Deque[]{ workStack, returnStack };
+
+    // === Fallback 解码（当 reverseSymbolTable 缺项或类型不匹配时） ===
+    private static final String[] BASE_NAMES = new String[32];
+    static {
+        for (var e : BASE_OPCODE_MAP.entrySet()) {
+            int v = e.getValue();
+            if (v >= 0 && v < 32) BASE_NAMES[v] = e.getKey();
+        }
+    }
+
+    private static Definitions.Token copyFromOuterToken(yaku.uxntal.Token tk) {
+        if (tk == null) return null;
+        return new Definitions.Token(tk.type, tk.value, tk.size, tk.stack, tk.keep, tk.lineNum);
+    }
+
+    private Definitions.Token tokenFromAny(Object entry, int pc) {
+        if (entry == null) return decodeAtPc(pc);
+        if (entry instanceof Definitions.Token dt) return dt;
+        if (entry instanceof Encoder.ReverseEntry re) return copyFromOuterToken(re.token);
+        return decodeAtPc(pc);
+    }
+
+    private Definitions.Token decodeAtPc(int atPc) {
+        int op = readByte(atPc) & 0xFF;
+        // 固定编码
+        if (op == 0x00) return new Definitions.Token(TokenType.INSTR, "BRK", 1, 0, 0, 0);
+        if (op == 0x20) return new Definitions.Token(TokenType.INSTR, "JCI", 1, 0, 0, 0);
+        if (op == 0x40) return new Definitions.Token(TokenType.INSTR, "JMI", 1, 0, 0, 0);
+        if (op == 0x60) return new Definitions.Token(TokenType.INSTR, "JSI", 1, 0, 0, 0);
+
+        // LIT：高位 1，模式位中含 s/r/k，其中 s 影响立即数宽度与随后的 pc 前进
+        if ((op & 0x80) != 0) {
+            int size  = ((op & MODE_SHORT)  != 0) ? 2 : 1;
+            int rbit  = ((op & MODE_RETURN) != 0) ? 1 : 0;
+            int kbit  = ((op & MODE_KEEP)   != 0) ? 1 : 0;
+            return new Definitions.Token(TokenType.LIT, "", size, rbit, kbit, 0);
+        }
+
+        // 普通指令：低 5 位为基码，0x10/0x20/0x40 为 k/s/r
+        int base = op & 0x1F;
+        String name = (base >= 0 && base < BASE_NAMES.length) ? BASE_NAMES[base] : null;
+        if (name == null || name.isEmpty()) return null;
+        int size  = ((op & MODE_SHORT)  != 0) ? 2 : 1;
+        int rbit  = ((op & MODE_RETURN) != 0) ? 1 : 0;
+        int kbit  = ((op & MODE_KEEP)   != 0) ? 1 : 0;
+        return new Definitions.Token(TokenType.INSTR, name, size, rbit, kbit, 0);
+    }
 
     private int pc = MAIN_ADDRESS;
     private int instructionCount = 0;
     private boolean halted = false;
 
-    private String currentParent = "MAIN";
+    // 仅用于警告的“父标签”跟踪
     private final Deque<String> callStack = new ArrayDeque<>();
-    private final Set<String> warned = new HashSet<>();
+    private String currentParent = "<main>";
 
+    // -------- 构造 --------
     public Interpreter(byte[] memory,
                        List<Definitions.Token> tokens,
                        Map<Integer, Definitions.Token> reverseSymbolTable) {
@@ -50,48 +102,58 @@ public class Interpreter {
         callStack.push(currentParent);
     }
 
-    //Public mini-API for Actions
-    public int  getPc() { return pc; }
-    public void setPcRaw(int newPc) { this.pc = newPc; }
-    public void jumpAbs(int addr)   { this.pc = (addr & 0xFFFF) - 1; }
-    public void jumpRel8(int rel8)  { this.pc += (byte) rel8; }
+    // -------- 辅助：活跃栈（由 r 位决定）--------
+    public Deque<StackElem> active(Definitions.Token t) {
+        return (t.stack == 1) ? returnStack : workStack;
+    }
+    public Deque<StackElem> work()  { return workStack; }
+    public Deque<StackElem> ret()   { return returnStack; }
 
-    public void jumpRelShort(int rel16) { this.pc = this.pc + 2 + (short) rel16; }
-    public void pushReturnAddr(int addr) { this.returnStack.addLast(new StackElem(addr & 0xFFFF, 2)); }
-    public int  getWorkStackSize()   { return this.workStack.size(); }
-    public int  getReturnStackSize() { return this.returnStack.size(); }
-    public int  readByte(int addr) { return memory[addr & MEM_MASK] & 0xFF; }
-    public int  readShortLE(int addr) {
-        int hi = memory[addr & MEM_MASK] & 0xFF;
-        int lo = memory[(addr + 1) & MEM_MASK] & 0xFF;
-        return ((hi << 8) | lo) & 0xFFFF;
+    // -------- Memory helpers --------
+    int readByte(int addr) { return memory[addr & MEM_MASK] & 0xFF; }
+
+    int readShortLE(int addr) {
+        int a = memory[addr & MEM_MASK] & 0xFF;
+        int b = memory[(addr + 1) & MEM_MASK] & 0xFF;
+        return (b << 8) | a;
     }
-    public int loadMemory(int addr, int sz) {
-        return (sz == 2)
-                ? ((readByte(addr) << 8) | readByte((addr + 1) & MEM_MASK)) & 0xFFFF
-                : readByte(addr) & 0xFF;
+
+    int loadMemory(int addr, int size) {
+        return (size == 2) ? readShortLE(addr) : (memory[addr & MEM_MASK] & 0xFF);
     }
-    public void storeMemory(int addr, int val, int sz) {
-        if (sz == 2) {
-            memory[addr & MEM_MASK] = (byte)((val >> 8) & 0xFF);
-            memory[(addr + 1) & MEM_MASK] = (byte)(val & 0xFF);
+
+    void storeMemory(int addr, int size, int value) {
+        if (size == 2) {
+            memory[addr & MEM_MASK] = (byte) (value & 0xFF);
+            memory[(addr + 1) & MEM_MASK] = (byte) ((value >> 8) & 0xFF);
         } else {
-            memory[addr & MEM_MASK] = (byte)(val & 0xFF);
+            memory[addr & MEM_MASK] = (byte) (value & 0xFF);
         }
     }
-    public void requestHalt() { this.halted = true; }
 
-    //Run loop
+    static int maskBySize(int v, int sz) { return (sz == 2) ? (v & 0xFFFF) : (v & 0xFF); }
+
+    // -------- Run --------
     public void run() {
         try {
             while (!halted && pc >= 0 && pc < memory.length) {
                 if (++instructionCount > MAX_INSTRUCTIONS)
                     throw new RuntimeException("Max instruction count exceeded (可能死循环)");
 
-                Definitions.Token t = reverseSymbolTable.get(pc);
-                if (t == null) { // data byte
+                // Object entry = reverseSymbolTable.get(pc);
+                // Definitions.Token t = tokenFromAny(entry, pc);
+                // if (t == null) { // data
+                //     pc++;
+                //     continue;
+                            Object entry = reverseSymbolTable.get(pc);
+            Definitions.Token t = tokenFromAny(entry, pc);
+            // 关键：凡是不是 INSTR/LIT，就回退成“按内存字节解码”
+            if (t == null || (t.type != TokenType.INSTR && t.type != TokenType.LIT)) {
+                t = decodeAtPc(pc);
+                if (t == null) { // 真是数据
                     pc++;
                     continue;
+                }
                 }
 
                 if (t.type == TokenType.INSTR) {
@@ -103,239 +165,168 @@ public class Interpreter {
                 pc++;
             }
         } catch (Exception e) {
-            System.err.println("Error at pc=" + pc + ": " + e.getMessage());
+            System.err.println("Error at pc=" + pc + ": " + e.getMessage()
+                    + " (" + e.getClass().getName() + ")");
             showStacks();
-            throw e;
+            throw new RuntimeException(e);
         }
     }
 
-    //Execute one instruction
-    private boolean executeInstr(Definitions.Token t) {
-        final String instr = t.value;
-
-        if ("BRK".equals(instr)) {
-            System.out.println("*** DONE ***");
-            showStacks();
-            return true;
-        }
-
-        // Stack-manipulation ops handled here 
-        if (stack_operations.containsKey(instr)) {
-            conditionStack(t);
-            performStackOp(t);
-            return false;
-        }
-
-        // First: try Actions table (ALU / mem / branch / IO)
-        Actions.Action act = Actions.ACTION_TABLE.get(instr);
-        if (act != null) {
-            List<Integer> argsVals = (act.nArgs == 0) ? Collections.emptyList() : getArgsFromStack(t, act.nArgs);
-            // Convert to StackElem[] for Actions API
-            Interpreter.StackElem[] arr = new Interpreter.StackElem[argsVals.size()];
-            for (int i = 0; i < argsVals.size(); i++) {
-                
-                arr[i] = new Interpreter.StackElem(argsVals.get(i), t.size);
-            }
-            Interpreter.StackElem res = act.exec.apply(arr, t.size, t.stack, t.keep, this);
-            if (act.hasResult && res != null) {
-                
-                stacks[t.stack].addLast(new StackElem(res.value, res.size));
-            }
-            return false;
-        }
-
-        // table-driven ALU from Definitions 
-        if (alu_ops.containsKey(instr)) {
-            List<Integer> args = getArgsFromStack(t, alu_ops.get(instr).nArgs);
-            int result = alu_ops.get(instr).apply(args, t.size);
-            if (instr.matches("EQU|NEQ|LTH|GTH")) {
-                stacks[t.stack].addLast(new StackElem(result, 1));
-            } else {
-                stacks[t.stack].addLast(new StackElem(result, t.size));
-            }
-            return false;
-        }
-
-        throw new UnsupportedOperationException("Unknown or unimplemented instruction: " + instr);
+    public static void runProgram(byte[] program) {
+        new Interpreter(program, Collections.emptyList(), Collections.emptyMap()).run();
     }
 
-    //Literal push
-    private void pushLiteral(Definitions.Token t) {
-        int val = (t.size == 2)
-                ? readShortLE((pc + 1) & MEM_MASK)
-                : (memory[(pc + 1) & MEM_MASK] & 0xFF);
-        stacks[t.stack].addLast(new StackElem(val, t.size));
-        pc += t.size; // skip literal payload
-    }
+    // -------- Literal --------
+    // void pushLiteral(Definitions.Token t) {
+    //     int val = (t.size == 2)
+    //             ? readShortLE((pc + 1) & MEM_MASK)
+    //             : (memory[(pc + 1) & MEM_MASK] & 0xFF);
+    //     active(t).addLast(new StackElem(val, t.size)); // LIT 遵循 r/s
+    //     pc += t.size; // 跳过立即数
+    // }
+    ///////////////////////////////////////////////////////////////
+// 1) 新增：
+int readShortBE(int addr) {
+    int hi = memory[addr & MEM_MASK] & 0xFF;
+    int lo = memory[(addr + 1) & MEM_MASK] & 0xFF;
+    return (hi << 8) | lo;
+}
 
-    //Parent label tracking (for warnings)
+// 2) 修改 pushLiteral：
+void pushLiteral(Definitions.Token t) {
+    int val = (t.size == 2)
+        ? readShortBE((pc + 1) & MEM_MASK)  // ← 改成大端读取
+        : (memory[(pc + 1) & MEM_MASK] & 0xFF);
+    active(t).addLast(new StackElem(val, t.size));
+    pc += t.size;
+}
+
+/// /////////////////////////////////////////////////////////
+
+    // -------- Parent label 跟踪（仅用于日志/警告）--------
     private void handleCallTracking(Definitions.Token t) {
         if ("JSR".equals(t.value) && t.size == 2 && t.stack == 0) {
-            Definitions.Token labelTok = reverseSymbolTable.get(pc - 3);
+            Object _labelTokA = reverseSymbolTable.get(pc - 3);
+            Definitions.Token labelTok = tokenFromAny(_labelTokA, pc - 3);
             currentParent = (labelTok != null) ? labelTok.value : "<lambda>";
             callStack.push(currentParent);
         } else if ("JSI".equals(t.value)) {
-            Definitions.Token labelTok = reverseSymbolTable.get(pc + 1);
+            Object _labelTokB = reverseSymbolTable.get(pc + 1);
+            Definitions.Token labelTok = tokenFromAny(_labelTokB, pc + 1);
             if (labelTok != null) { currentParent = labelTok.value; callStack.push(currentParent); }
         } else if ("JMP".equals(t.value) && t.size == 2 && t.stack == 0) {
-            Definitions.Token labelTok = reverseSymbolTable.get(pc - 3);
+            Object _labelTokA = reverseSymbolTable.get(pc - 3);
+            Definitions.Token labelTok = tokenFromAny(_labelTokA, pc - 3);
             if (labelTok != null) currentParent = labelTok.value;
         } else if ("JMI".equals(t.value)) {
-            Definitions.Token labelTok = reverseSymbolTable.get(pc + 1);
+            Object _labelTokB = reverseSymbolTable.get(pc + 1);
+            Definitions.Token labelTok = tokenFromAny(_labelTokB, pc + 1);
             if (labelTok != null) currentParent = labelTok.value;
         }
+    }
 
-        if ("JMP".equals(t.value) && t.size == 2 && t.stack == 1) { // JMP2r
-            if (!callStack.isEmpty()) callStack.pop();
-            currentParent = callStack.peek();
-        } else if ("JMP".equals(t.value) && t.size == 2 && t.stack == 0) {
-            Definitions.Token prev = reverseSymbolTable.get(pc - 1);
-            if (prev != null && "STH".equals(prev.value) && prev.size == 2 && prev.stack == 1) {
-                if (!callStack.isEmpty()) callStack.pop();
-                currentParent = callStack.peek();
-            }
+    // -------- Execute --------
+    public static class Action {
+        public final String name;
+        public final int argc;       // 需要的栈元素个数（元素宽度由 t.size 决定）
+        public final boolean sameSize;
+        public final ActionImpl impl;
+        public Action(String name, int argc, boolean sameSize, ActionImpl impl) {
+            this.name = name; this.argc = argc; this.sameSize = sameSize; this.impl = impl;
         }
     }
+    @FunctionalInterface
+    public interface ActionImpl {
+        void apply(Interpreter vm, Definitions.Token t, StackElem[] args, int sz);
+    }
 
-    //Arg handling
-    private List<Integer> getArgsFromStack(Definitions.Token t, int nArgs) {
-        List<Integer> args = new ArrayList<>();
-        List<StackElem> keepList = new ArrayList<>();
-        final String instr = t.value;
+    public static final Map<String, Action> ACTION_TABLE = new HashMap<>();
+    static {
+        // 控制/跳转
+        ACTION_TABLE.put("BRK", new Action("BRK", 0, false, Actions::brk));
+        ACTION_TABLE.put("JMP", new Action("JMP", 1, false, Actions::jmp));
+        ACTION_TABLE.put("JCN", new Action("JCN", 2, false, Actions::jcn));
+        ACTION_TABLE.put("JSR", new Action("JSR", 1, false, Actions::jsr));
+        ACTION_TABLE.put("JMI", new Action("JMI", 0, false, Actions::jmi)); // 从栈取地址
+        ACTION_TABLE.put("JSI", new Action("JSI", 0, false, Actions::jsi)); // 从栈取地址
+        ACTION_TABLE.put("JCI", new Action("JCI", 0, false, Actions::jci)); // 从栈取 cond+addr
 
-        for (int i = 0; i < nArgs; i++) {
-            StackElem arg;
+        // 算术/逻辑/移位
+        ACTION_TABLE.put("INC", new Action("INC", 1, true,  Actions::inc));
+        ACTION_TABLE.put("ADD", new Action("ADD", 2, true,  Actions::add));
+        ACTION_TABLE.put("SUB", new Action("SUB", 2, true,  Actions::sub));
+        ACTION_TABLE.put("MUL", new Action("MUL", 2, true,  Actions::mul));
+        ACTION_TABLE.put("DIV", new Action("DIV", 2, true,  Actions::div));
+        ACTION_TABLE.put("AND", new Action("AND", 2, true,  Actions::and));
+        ACTION_TABLE.put("ORA", new Action("ORA", 2, true,  Actions::ora));
+        ACTION_TABLE.put("EOR", new Action("EOR", 2, true,  Actions::eor));
+        ACTION_TABLE.put("SFT", new Action("SFT", 2, true,  Actions::sft));
 
-            // Special rules like Perl:
-            if (("LDA".equals(instr) || "STA".equals(instr)) && i == 0) {
-                arg = getShortArg(t, t.stack);
-            } else if ("JCN".equals(instr) && i == 1) {
-                arg = getByteArg(t, t.stack);
-            } else if ("JCI".equals(instr)) {
-                arg = getByteArg(t, t.stack);
-            } else if (needsByteFirst(instr, i)) {
-                arg = getByteArg(t, t.stack);
-            } else {
-                arg = (t.size == 2) ? getShortArg(t, t.stack) : getByteArg(t, t.stack);
-            }
+        // 比较
+        ACTION_TABLE.put("EQU", new Action("EQU", 2, true,  Actions::equ));
+        ACTION_TABLE.put("NEQ", new Action("NEQ", 2, true,  Actions::neq));
+        ACTION_TABLE.put("GTH", new Action("GTH", 2, true,  Actions::gth));
+        ACTION_TABLE.put("LTH", new Action("LTH", 2, true,  Actions::lth));
 
-            if (t.keep == 1) keepList.add(arg);
-            args.add(arg.value);
+        // 内存/设备
+        ACTION_TABLE.put("LDZ", new Action("LDZ", 1, false, Actions::ldz));
+        ACTION_TABLE.put("STZ", new Action("STZ", 2, false, Actions::stz));
+        ACTION_TABLE.put("LDR", new Action("LDR", 1, false, Actions::ldr));
+        ACTION_TABLE.put("STR", new Action("STR", 2, false, Actions::str));
+        ACTION_TABLE.put("LDA", new Action("LDA", 1, false, Actions::lda));
+        ACTION_TABLE.put("STA", new Action("STA", 2, false, Actions::sta));
+        ACTION_TABLE.put("DEI", new Action("DEI", 1, false, Actions::dei)); // 端口在上
+        ACTION_TABLE.put("DEO", new Action("DEO", 2, false, Actions::deo)); // 值在下、端口在上
+
+        // 栈操作
+        ACTION_TABLE.put("POP", new Action("POP", 1, true,  Actions::pop));
+        ACTION_TABLE.put("NIP", new Action("NIP", 2, true,  Actions::nip));
+        ACTION_TABLE.put("SWP", new Action("SWP", 2, true,  Actions::swp));
+        ACTION_TABLE.put("ROT", new Action("ROT", 3, true,  Actions::rot));
+        ACTION_TABLE.put("DUP", new Action("DUP", 1, true,  Actions::dup));
+        ACTION_TABLE.put("OVR", new Action("OVR", 2, true,  Actions::ovr));
+        ACTION_TABLE.put("STH", new Action("STH", 1, false, Actions::sth)); // 推到另一栈
+    }
+
+    private boolean executeInstr(Definitions.Token t) {
+        String name = t.value.toUpperCase(Locale.ROOT);
+        Action a = ACTION_TABLE.get(name);
+        if (a == null) throw new RuntimeException("Unknown instruction: " + t.value);
+
+        Deque<StackElem> S = active(t);            // **只看 r 位**
+        ensureSize(S, a.argc, t);
+
+        int sz = t.size;
+        StackElem[] args = new StackElem[a.argc];
+        for (int i = a.argc - 1; i >= 0; --i) args[i] = S.removeLast();
+
+        // Debug
+        // System.out.printf("INSTR %s s=%s r=%s k=%s -> %s%n",
+        // t.value, t.size == 2, t.stack == 1, t.keep == 1,
+        // String.format("%02X", Definitions.getOpcodeByte(t.value, t.size == 2, t.stack == 1, t.keep == 1)));
+        if (Flags.isDebug()) {
+            System.err.printf("INSTR %s s=%s r=%s k=%s -> %s%n",
+            t.value, t.size == 2, t.stack == 1, t.keep == 1,
+            String.format("%02X", Definitions.getOpcodeByte(t.value, t.size == 2, t.stack == 1, t.keep == 1)));
         }
-        if (t.keep == 1) {
-            Collections.reverse(keepList);
-            stacks[t.stack].addAll(keepList);
-        }
-        return args;
+        System.err.flush();
+
+
+
+        a.impl.apply(this, t, args, sz);
+        return "BRK".equals(name);
     }
 
-    private boolean needsByteFirst(String instr, int argIndex) {
-        if (instr.startsWith("LD") || instr.startsWith("ST")
-                || "DEI".equals(instr) || "SFT".equals(instr) || "DEO".equals(instr)) {
-            return argIndex == 0;
-        }
-        return false;
-    }
-
-    //Width conditioning for stack-ops
-    private void conditionStack(Definitions.Token t) {
-        int bytesNeeded = stack_operations.get(t.value)[0] * t.size;
-        int bytesGot = 0;
-        List<StackElem> temp = new ArrayList<>();
-
-        while (bytesGot < bytesNeeded) {
-            if (stacks[t.stack].isEmpty())
-                throw new RuntimeException("Stack underflow, need " + bytesNeeded + " bytes for " + t.value);
-
-            StackElem e = stacks[t.stack].removeLast();
-            bytesGot += e.size;
-
-            if (bytesGot > bytesNeeded) {
-                int hi = (e.value >> 8) & 0xFF, lo = e.value & 0xFF;
-                stacks[t.stack].addLast(new StackElem(hi, 1));
-                bytesGot -= 1;
-                e = new StackElem(lo, 1);
-            }
-
-            if (t.size == 2 && e.size == 1) {
-                warnSizeMismatch(t, 0);
-                e = getShortArg(t, t.stack);
-                bytesGot += (e.size - 1);
-            } else if (t.size == 1 && e.size == 2) {
-                warnSizeMismatch(t, 1);
-                int lo = e.value & 0xFF, hi = (e.value >> 8) & 0xFF;
-                stacks[t.stack].addLast(new StackElem(hi, 1));
-                bytesGot -= 1;
-                e = new StackElem(lo, 1);
-            }
-            temp.add(0, e);
-        }
-        stacks[t.stack].addAll(temp);
-    }
-
-    private StackElem getByteArg(Definitions.Token t, int rs) {
-        if (stacks[rs].isEmpty()) throw new RuntimeException("Stack underflow on " + t.value);
-        StackElem arg = stacks[rs].removeLast();
-        if (arg.size == 2 && !bin_ops.containsKey(t.value)) {
-            warnSizeMismatch(t, 1); // short, expects byte
-            int hi = (arg.value >> 8) & 0xFF, lo = arg.value & 0xFF;
-            stacks[rs].addLast(new StackElem(hi, 1));
-            arg = new StackElem(lo, 1);
-        }
-        return arg;
-    }
-
-    private StackElem getShortArg(Definitions.Token t, int rs) {
-        if (stacks[rs].isEmpty()) throw new RuntimeException("Stack underflow on " + t.value);
-        StackElem arg = stacks[rs].removeLast();
-        if (arg.size == 1) return extendWithExtraByte(arg, t, rs);
-        return arg;
-    }
-
-    private StackElem extendWithExtraByte(StackElem lowByteElem, Definitions.Token t, int rs) {
-        if (stacks[rs].isEmpty()) throw new RuntimeException("Stack underflow forming short on " + t.value);
-        StackElem highPart = stacks[rs].removeLast();
-        boolean splitShort = false;
-        int hiByte;
-        if (highPart.size == 1) hiByte = highPart.value & 0xFF;
-        else {
-            splitShort = true;
-            int hi = (highPart.value >> 8) & 0xFF, lo = highPart.value & 0xFF;
-            stacks[rs].addLast(new StackElem(hi, 1)); hiByte = lo;
-        }
-        if (splitShort) warnSizeMismatch(t, 0);
-        int shortVal = ((hiByte & 0xFF) << 8) | (lowByteElem.value & 0xFF);
-        return new StackElem(shortVal, 2);
-    }
-
-    private void warnSizeMismatch(Definitions.Token t, int sb) {
-        String key = t.value + "_" + currentParent + "_line" + t.lineNum;
-        if (warned.contains(key)) return;
-        warned.add(key);
-        System.err.println("Warning: value on stack is " +
-                (sb == 1 ? "short, instruction expects byte" : "byte, instruction expects short")
-                + ": " + t.value + " in " + currentParent + " (line " + t.lineNum + ")");
-    }
-
-    //Stack ops
-    private void performStackOp(Definitions.Token t) {
-        Deque<StackElem> S = stacks[t.stack];
-        switch (t.value) {
-            case "DUP" -> { ensureSize(S, 1, t); StackElem a = S.peekLast(); S.addLast(new StackElem(a.value, t.size)); }
-            case "POP" -> { ensureSize(S, 1, t); S.removeLast(); }
-            case "NIP" -> { ensureSize(S, 2, t); StackElem a = S.removeLast(); S.removeLast(); S.addLast(a); }
-            case "SWP" -> { ensureSize(S, 2, t); StackElem a = S.removeLast(), b = S.removeLast(); S.addLast(a); S.addLast(b); }
-            case "ROT" -> { ensureSize(S, 3, t); StackElem a = S.removeLast(), b = S.removeLast(), c = S.removeLast(); S.addLast(b); S.addLast(a); S.addLast(c); }
-            case "OVR" -> { ensureSize(S, 2, t); StackElem a = S.removeLast(), b = S.peekLast(); S.addLast(a); S.addLast(new StackElem(b.value, t.size)); }
-            case "STH" -> { ensureSize(S, 1, t); StackElem a = S.removeLast(); stacks[t.stack ^ 1].addLast(new StackElem(a.value, t.size)); }
-            default -> throw new UnsupportedOperationException("Stack op not implemented: " + t.value);
-        }
-    }
     private void ensureSize(Deque<StackElem> S, int n, Definitions.Token t) {
         if (S.size() < n) throw new RuntimeException("Stack underflow for " + t.value);
     }
 
-    //Debug
+    // -------- For Actions access --------
+    public int getPc() { return pc; }
+    public void setPc(int value) { pc = value & MEM_MASK; }
+    public byte[] mem() { return memory; }
+
+    // -------- Debug --------
     public void showStacks() {
         System.out.println("WorkStack:   " + workStack);
         System.out.println("ReturnStack: " + returnStack);

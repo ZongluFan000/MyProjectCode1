@@ -1,6 +1,4 @@
 package yaku.uxntal;
-import yaku.uxntal.units.UxnState;
-
 import java.util.*;
 import java.util.regex.Pattern;
 

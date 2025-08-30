@@ -3,7 +3,6 @@ package yaku.uxntal;
 import java.lang.reflect.*;
 import java.util.*;
 import java.nio.file.*;
-import yaku.uxntal.units.UxnState;
 
 
 public final class Main {
@@ -11,10 +10,18 @@ public final class Main {
     public static void main(String[] args) {
         try {
             if (args.length >= 2 && "-r".equals(args[0])) {
+                // String talPath = args[1];
+                // System.out.println(">>");
+                // AsmBundle asm = assemble(talPath);
+                // runInterpreter(asm);
+                // return;
+                Flags.applyEnvDefaults();       // 先读环境（如 YAKU_VERBOSE / YAKU_DBG）
+                Flags.setDebug(false);          // -r 默认不开调试
+                Flags.setFlag("PQ", false);     // -r 默认不走 print-and-quit
                 String talPath = args[1];
                 System.out.println(">>");
                 AsmBundle asm = assemble(talPath);
-                runInterpreter(asm);
+                runInterpreter(asm);            // 这里才会看到 DEO #18 的真实输出
                 return;
             }
 
@@ -231,65 +238,100 @@ public final class Main {
     //Interpreter launch logic/
 
     private static void runInterpreter(AsmBundle asm) throws Exception {
-        Class<?> ik = Class.forName("yaku.uxntal.Interpreter");
+        // Class<?> ik = Class.forName("yaku.uxntal.Interpreter");
 
-        // Attempt 0: Interpreter(byte[], List, Map).run()
-        try {
-            Constructor<?> c = ik.getConstructor(byte[].class, List.class, Map.class);
-            Object vm = c.newInstance(asm.program, asm.tokens, asm.reverseSymbolTable);
-            Method runM = ik.getMethod("run");
-            runM.invoke(vm);
-            return;
-        } catch (NoSuchMethodException ignore) {}
+        // // Attempt 0: Interpreter(byte[], List, Map).run()
+        // try {
+        //     Constructor<?> c = ik.getConstructor(byte[].class, List.class, Map.class);
+        //     Object vm = c.newInstance(asm.program, asm.tokens, asm.reverseSymbolTable);
+        //     Method runM = ik.getMethod("run");
+        //     runM.invoke(vm);
+        //     return;
+        // } catch (NoSuchMethodException ignore) {}
 
-        // Attempt 1: new Interpreter(byte[]).run()
-        try {
-            Constructor<?> c = ik.getConstructor(byte[].class);
-            Object vm = c.newInstance(asm.program);
-            Method runM = ik.getMethod("run");
-            runM.invoke(vm);
-            return;
-        } catch (NoSuchMethodException ignore) {}
+        // // Attempt 1: new Interpreter(byte[]).run()
+        // try {
+        //     Constructor<?> c = ik.getConstructor(byte[].class);
+        //     Object vm = c.newInstance(asm.program);
+        //     Method runM = ik.getMethod("run");
+        //     runM.invoke(vm);
+        //     return;
+        // } catch (NoSuchMethodException ignore) {}
 
-        // Attempt 2: Interpreter.runProgram(byte[])
-        try {
-            Method runProg = ik.getMethod("runProgram", byte[].class);
-            runProg.invoke(null, asm.program);
-            return;
-        } catch (NoSuchMethodException ignore) {}
+        // // Attempt 2: Interpreter.runProgram(byte[])
+        // try {
+        //     Method runProg = ik.getMethod("runProgram", byte[].class);
+        //     runProg.invoke(null, asm.program);
+        //     return;
+        // } catch (NoSuchMethodException ignore) {}
 
         
-        try {
+        // try {
             
-            try {
-                Constructor<?> c = ik.getConstructor(UxnState.class);
-                Object arg = (asm.uxnObj instanceof UxnState) ? asm.uxnObj : new UxnState();
-                Object vm = c.newInstance(arg);
-                Method runM = ik.getMethod("run");
-                runM.invoke(vm);
-                return;
-            } catch (NoSuchMethodException ignored) {}
+        //     try {
+        //         Constructor<?> c = ik.getConstructor(UxnState.class);
+        //         Object arg = (asm.uxnObj instanceof UxnState) ? asm.uxnObj : new UxnState();
+        //         Object vm = c.newInstance(arg);
+        //         Method runM = ik.getMethod("run");
+        //         runM.invoke(vm);
+        //         return;
+        //     } catch (NoSuchMethodException ignored) {}
 
        
-            if (asm.uxnObj != null) {
-                for (Constructor<?> c : ik.getConstructors()) {
-                    Class<?>[] pt = c.getParameterTypes();
-                    if (pt.length == 1 && pt[0].getSimpleName().equals("UxnState") && pt[0].isInstance(asm.uxnObj)) {
-                        Object vm = c.newInstance(asm.uxnObj);
-                        Method runM = ik.getMethod("run");
-                        runM.invoke(vm);
-                        return;
-                    }
-                }
-            }
-        } catch (ReflectiveOperationException ignore) {}
+        //     if (asm.uxnObj != null) {
+        //         for (Constructor<?> c : ik.getConstructors()) {
+        //             Class<?>[] pt = c.getParameterTypes();
+        //             if (pt.length == 1 && pt[0].getSimpleName().equals("UxnState") && pt[0].isInstance(asm.uxnObj)) {
+        //                 Object vm = c.newInstance(asm.uxnObj);
+        //                 Method runM = ik.getMethod("run");
+        //                 runM.invoke(vm);
+        //                 return;
+        //             }
+        //         }
+        //     }
+        // } catch (ReflectiveOperationException ignore) {}
 
-        throw new IllegalStateException(
-            "No compatible Interpreter found. Tried: " +
-            "Interpreter(byte[], List, Map).run(), new Interpreter(byte[]).run(), " +
-            "Interpreter.runProgram(byte[]), new Interpreter(UxnState).run(), " +
-            "new Interpreter(<any UxnState-like>).run()."
-        );
+        // throw new IllegalStateException(
+        //     "No compatible Interpreter found. Tried: " +
+        //     "Interpreter(byte[], List, Map).run(), new Interpreter(byte[]).run(), " +
+        //     "Interpreter.runProgram(byte[]), new Interpreter(UxnState).run(), " +
+        //     "new Interpreter(<any UxnState-like>).run()."
+        // );
+        Class<?> ik = Class.forName("yaku.uxntal.Interpreter");
+
+        // —— 关键修复：把可能的 ROM 切片放回 64KB 内存的 0x0100 位置 ——
+        byte[] mem = asm.program;
+                if (mem == null) throw new IllegalStateException("program bytes == null");
+                final int ORIGIN = yaku.uxntal.Definitions.MAIN_ADDRESS; // 0x0100
+                final int MEMSZ  = yaku.uxntal.Definitions.MEMORY_SIZE;  // 0x10000
+                if (mem.length != MEMSZ) {                 // 不是完整内存，就视为 ROM 切片
+                    byte[] full = new byte[MEMSZ];
+                    System.arraycopy(mem, 0, full, ORIGIN, Math.min(mem.length, MEMSZ - ORIGIN));
+                    mem = full;
+                }
+        
+                // 优先走 (byte[], List, Map).run()
+                try {
+                    var c = ik.getConstructor(byte[].class, java.util.List.class, java.util.Map.class);
+                    Object vm = c.newInstance(mem, java.util.Collections.emptyList(), java.util.Collections.emptyMap());
+                    ik.getMethod("run").invoke(vm);
+                    return;
+                } catch (NoSuchMethodException ignore) {}
+                // 其次 (byte[]).run()
+                try {
+                    var c = ik.getConstructor(byte[].class);
+                    Object vm = c.newInstance(mem);
+                    ik.getMethod("run").invoke(vm);
+                    return;
+                } catch (NoSuchMethodException ignore) {}
+                // 最后 static runProgram(byte[])
+                try {
+                    ik.getMethod("runProgram", byte[].class).invoke(null, mem);
+                    return;
+                } catch (NoSuchMethodException ignore) {}
+    
+        throw new IllegalStateException("No suitable Interpreter entrypoint.");
+    
     }
 
     //utils

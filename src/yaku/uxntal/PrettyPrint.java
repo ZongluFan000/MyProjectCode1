@@ -2,7 +2,6 @@ package yaku.uxntal;
 
 import java.util.*;
 import yaku.uxntal.Definitions.TokenType;
-import yaku.uxntal.units.UxnState;
 
 /**
  * PrettyPrint

@@ -235,7 +235,10 @@ public class Encoder {
 
                     int opcode = Definitions.getOpcodeByte(t.value, shortMode, returnMode, keepMode);
                     //////////////////////////////////////////////////////////////
-                    System.out.printf("INSTR %s s=%s r=%s k=%s -> %02X%n", t.value, shortMode, returnMode, keepMode, opcode);
+                    if (Flags.isDebug() || Flags.shouldPrintAndQuit()) {
+                            System.err.printf("INSTR %s s=%s r=%s k=%s -> %02X%n",
+                                 t.value, shortMode, returnMode, keepMode, opcode);
+                    }
                     ////////////////////////////////////////////////////////////
                     pc = emitByte(memory, pc, opcode);
                     maxAddr = Math.max(maxAddr, pc - 1);
