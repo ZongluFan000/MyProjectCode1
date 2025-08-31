@@ -1,9 +1,7 @@
 package yaku.uxntal;
 
 import java.util.*;
-
 import yaku.uxntal.Definitions.TokenType;
-
 import static yaku.uxntal.Definitions.*;
 
 public class Interpreter {
@@ -30,13 +28,13 @@ public class Interpreter {
     // -------- VM state --------
     private final byte[] memory;
     private final List<Definitions.Token> tokens;
-    // 反向符号表的 value 类型可能是 Definitions.Token 或 Encoder.ReverseEntry
+    // 反向符号表：值可能是 Definitions.Token 或 Encoder.ReverseEntry
     private final Map<Integer, ?> reverseSymbolTable;
 
     private final Deque<StackElem> workStack = new ArrayDeque<>();
     private final Deque<StackElem> returnStack = new ArrayDeque<>();
 
-    // === Fallback 解码（当 reverseSymbolTable 缺项或类型不匹配时） ===
+    // === 按字节解码用 ===
     private static final String[] BASE_NAMES = new String[32];
     static {
         for (var e : BASE_OPCODE_MAP.entrySet()) {
@@ -59,13 +57,14 @@ public class Interpreter {
 
     private Definitions.Token decodeAtPc(int atPc) {
         int op = readByte(atPc) & 0xFF;
+
         // 固定编码
         if (op == 0x00) return new Definitions.Token(TokenType.INSTR, "BRK", 1, 0, 0, 0);
         if (op == 0x20) return new Definitions.Token(TokenType.INSTR, "JCI", 1, 0, 0, 0);
         if (op == 0x40) return new Definitions.Token(TokenType.INSTR, "JMI", 1, 0, 0, 0);
         if (op == 0x60) return new Definitions.Token(TokenType.INSTR, "JSI", 1, 0, 0, 0);
 
-        // LIT：高位 1，模式位中含 s/r/k，其中 s 影响立即数宽度与随后的 pc 前进
+        // LIT：高位 1，s/r/k 位
         if ((op & 0x80) != 0) {
             int size  = ((op & MODE_SHORT)  != 0) ? 2 : 1;
             int rbit  = ((op & MODE_RETURN) != 0) ? 1 : 0;
@@ -102,7 +101,7 @@ public class Interpreter {
         callStack.push(currentParent);
     }
 
-    // -------- 辅助：活跃栈（由 r 位决定）--------
+    // -------- 活跃栈（由 r 位决定）--------
     public Deque<StackElem> active(Definitions.Token t) {
         return (t.stack == 1) ? returnStack : workStack;
     }
@@ -112,22 +111,21 @@ public class Interpreter {
     // -------- Memory helpers --------
     int readByte(int addr) { return memory[addr & MEM_MASK] & 0xFF; }
 
-    int readShortLE(int addr) {
-        int a = memory[addr & MEM_MASK] & 0xFF;
-        int b = memory[(addr + 1) & MEM_MASK] & 0xFF;
-        return (b << 8) | a;
+    // 大端读 16 位
+    int readShortBE(int addr) {
+        int hi = memory[addr & MEM_MASK] & 0xFF;
+        int lo = memory[(addr + 1) & MEM_MASK] & 0xFF;
+        return (hi << 8) | lo;
     }
-
     int loadMemory(int addr, int size) {
-        return (size == 2) ? readShortLE(addr) : (memory[addr & MEM_MASK] & 0xFF);
+        return (size == 2) ? readShortBE(addr) : (memory[addr & MEM_MASK] & 0xFF);
     }
-
     void storeMemory(int addr, int size, int value) {
         if (size == 2) {
-            memory[addr & MEM_MASK] = (byte) (value & 0xFF);
-            memory[(addr + 1) & MEM_MASK] = (byte) ((value >> 8) & 0xFF);
+            memory[addr & MEM_MASK] = (byte)((value >> 8) & 0xFF); // 高字节在前
+            memory[(addr + 1) & MEM_MASK] = (byte)(value & 0xFF);  // 低字节在后
         } else {
-            memory[addr & MEM_MASK] = (byte) (value & 0xFF);
+            memory[addr & MEM_MASK] = (byte)(value & 0xFF);
         }
     }
 
@@ -140,20 +138,14 @@ public class Interpreter {
                 if (++instructionCount > MAX_INSTRUCTIONS)
                     throw new RuntimeException("Max instruction count exceeded (可能死循环)");
 
-                // Object entry = reverseSymbolTable.get(pc);
-                // Definitions.Token t = tokenFromAny(entry, pc);
-                // if (t == null) { // data
-                //     pc++;
-                //     continue;
-                            Object entry = reverseSymbolTable.get(pc);
-            Definitions.Token t = tokenFromAny(entry, pc);
-            // 关键：凡是不是 INSTR/LIT，就回退成“按内存字节解码”
-            if (t == null || (t.type != TokenType.INSTR && t.type != TokenType.LIT)) {
-                t = decodeAtPc(pc);
-                if (t == null) { // 真是数据
-                    pc++;
-                    continue;
-                }
+                Object entry = reverseSymbolTable.get(pc);
+                Definitions.Token t = tokenFromAny(entry, pc);
+                if (t == null || (t.type != TokenType.INSTR && t.type != TokenType.LIT)) {
+                    t = decodeAtPc(pc);
+                    if (t == null) { // 真是数据
+                        pc++;
+                        continue;
+                    }
                 }
 
                 if (t.type == TokenType.INSTR) {
@@ -177,31 +169,14 @@ public class Interpreter {
     }
 
     // -------- Literal --------
-    // void pushLiteral(Definitions.Token t) {
-    //     int val = (t.size == 2)
-    //             ? readShortLE((pc + 1) & MEM_MASK)
-    //             : (memory[(pc + 1) & MEM_MASK] & 0xFF);
-    //     active(t).addLast(new StackElem(val, t.size)); // LIT 遵循 r/s
-    //     pc += t.size; // 跳过立即数
-    // }
-    ///////////////////////////////////////////////////////////////
-// 1) 新增：
-int readShortBE(int addr) {
-    int hi = memory[addr & MEM_MASK] & 0xFF;
-    int lo = memory[(addr + 1) & MEM_MASK] & 0xFF;
-    return (hi << 8) | lo;
-}
-
-// 2) 修改 pushLiteral：
-void pushLiteral(Definitions.Token t) {
-    int val = (t.size == 2)
-        ? readShortBE((pc + 1) & MEM_MASK)  // ← 改成大端读取
-        : (memory[(pc + 1) & MEM_MASK] & 0xFF);
-    active(t).addLast(new StackElem(val, t.size));
-    pc += t.size;
-}
-
-/// /////////////////////////////////////////////////////////
+    void pushLiteral(Definitions.Token t) {
+        int val = (t.size == 2)
+            ? readShortBE((pc + 1) & MEM_MASK)  // 大端读取
+            : (memory[(pc + 1) & MEM_MASK] & 0xFF);
+        active(t).addLast(new StackElem(val, t.size));
+        // pc += t.size;
+        pc += (t.size == 2 ? 2 : 1);
+    }
 
     // -------- Parent label 跟踪（仅用于日志/警告）--------
     private void handleCallTracking(Definitions.Token t) {
@@ -228,7 +203,7 @@ void pushLiteral(Definitions.Token t) {
     // -------- Execute --------
     public static class Action {
         public final String name;
-        public final int argc;       // 需要的栈元素个数（元素宽度由 t.size 决定）
+        public final int argc;       // 需要的参数个数（按 t.size：1=字节，2=字）
         public final boolean sameSize;
         public final ActionImpl impl;
         public Action(String name, int argc, boolean sameSize, ActionImpl impl) {
@@ -247,9 +222,9 @@ void pushLiteral(Definitions.Token t) {
         ACTION_TABLE.put("JMP", new Action("JMP", 1, false, Actions::jmp));
         ACTION_TABLE.put("JCN", new Action("JCN", 2, false, Actions::jcn));
         ACTION_TABLE.put("JSR", new Action("JSR", 1, false, Actions::jsr));
-        ACTION_TABLE.put("JMI", new Action("JMI", 0, false, Actions::jmi)); // 从栈取地址
-        ACTION_TABLE.put("JSI", new Action("JSI", 0, false, Actions::jsi)); // 从栈取地址
-        ACTION_TABLE.put("JCI", new Action("JCI", 0, false, Actions::jci)); // 从栈取 cond+addr
+        ACTION_TABLE.put("JMI", new Action("JMI", 0, false, Actions::jmi)); // 立即数形式：在 Actions 里读
+        ACTION_TABLE.put("JSI", new Action("JSI", 0, false, Actions::jsi)); // 立即数形式：在 Actions 里读
+        ACTION_TABLE.put("JCI", new Action("JCI", 0, false, Actions::jci)); // 立即数形式：在 Actions 里读
 
         // 算术/逻辑/移位
         ACTION_TABLE.put("INC", new Action("INC", 1, true,  Actions::inc));
@@ -288,37 +263,51 @@ void pushLiteral(Definitions.Token t) {
         ACTION_TABLE.put("STH", new Action("STH", 1, false, Actions::sth)); // 推到另一栈
     }
 
+    // ---- 按“字节/字”弹参数 ----
+
+    /** 仅弹出“一个字节”。若栈顶是 16 位：返回低字节，并把高字节留在栈上（变为 8 位元素）。 */
+    private StackElem popOneByte(java.util.Deque<StackElem> S, Definitions.Token t) {
+        if (S.isEmpty()) throw new RuntimeException("Stack underflow for " + t.value);
+        StackElem top = S.removeLast();
+        if (top.size == 1) return top; // 就是 8 位
+
+        // 16 位：按大端拆成 hi/lo；栈顶应当是 lo，hi 留在栈上
+        int hi = (top.value >> 8) & 0xFF;
+        int lo =  top.value       & 0xFF;
+        S.addLast(new StackElem(hi, 1));     // 高字节留栈
+        return new StackElem(lo, 1);         // 低字节作为“本次弹出的字节”
+    }
+
+    /** 弹出一个 16 位参数：按字节弹两次，组合成大端（hi<<8 | lo）。 */
+    private StackElem popOneWord(java.util.Deque<StackElem> S, Definitions.Token t) {
+        int lo = popOneByte(S, t).value & 0xFF;
+        int hi = popOneByte(S, t).value & 0xFF;
+        return new StackElem((hi << 8) | lo, 2);
+    }
+
     private boolean executeInstr(Definitions.Token t) {
         String name = t.value.toUpperCase(Locale.ROOT);
         Action a = ACTION_TABLE.get(name);
         if (a == null) throw new RuntimeException("Unknown instruction: " + t.value);
 
-        Deque<StackElem> S = active(t);            // **只看 r 位**
-        ensureSize(S, a.argc, t);
+        Deque<StackElem> S = active(t);   // 由 r 位选择工作/返回栈
 
         int sz = t.size;
         StackElem[] args = new StackElem[a.argc];
-        for (int i = a.argc - 1; i >= 0; --i) args[i] = S.removeLast();
-
-        // Debug
-        // System.out.printf("INSTR %s s=%s r=%s k=%s -> %s%n",
-        // t.value, t.size == 2, t.stack == 1, t.keep == 1,
-        // String.format("%02X", Definitions.getOpcodeByte(t.value, t.size == 2, t.stack == 1, t.keep == 1)));
-        if (Flags.isDebug()) {
-            System.err.printf("INSTR %s s=%s r=%s k=%s -> %s%n",
-            t.value, t.size == 2, t.stack == 1, t.keep == 1,
-            String.format("%02X", Definitions.getOpcodeByte(t.value, t.size == 2, t.stack == 1, t.keep == 1)));
+        // 逐个参数弹出：sz==1 按字节弹；sz==2 按 16 位弹
+        for (int i = a.argc - 1; i >= 0; --i) {
+            args[i] = (sz == 2) ? popOneWord(S, t) : popOneByte(S, t);
         }
-        System.err.flush();
 
-
+        if (Flags.isDebug()) {
+            System.err.printf("INSTR %s s=%s r=%s k=%s -> %02X%n",
+                    t.value, (t.size == 2), (t.stack == 1), (t.keep == 1),
+                    Definitions.getOpcodeByte(t.value, t.size == 2, t.stack == 1, t.keep == 1));
+            System.err.flush();
+        }
 
         a.impl.apply(this, t, args, sz);
         return "BRK".equals(name);
-    }
-
-    private void ensureSize(Deque<StackElem> S, int n, Definitions.Token t) {
-        if (S.size() < n) throw new RuntimeException("Stack underflow for " + t.value);
     }
 
     // -------- For Actions access --------

@@ -1,6 +1,8 @@
 package yaku.uxntal;
 
+import java.util.Deque;
 
+import yaku.uxntal.Interpreter.StackElem;
 
 public final class Actions {
     private Actions() {}
@@ -79,92 +81,154 @@ public final class Actions {
     //     vm.setPc((vm.getPc() + rel) & 0xFFFF);
     // }
 // ===== 控制/跳转 =====
+// JMP
 public static void jmp(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
     if (sz == 2) {
-        // 16 位绝对跳（含 r 位：JMP2 / JMP2r）
         int addr = args[0].value & 0xFFFF;
-        vm.setPc(addr);
+        vm.setPc((addr - 1) & 0xFFFF);          // 绝对跳：addr-1
     } else {
-        // 8 位相对跳（JMP）
-        int rel = (byte) (args[0].value & 0xFF);
+        int rel = (byte)(args[0].value & 0xFF); // 相对跳：直接加
         vm.setPc((vm.getPc() + rel) & 0xFFFF);
     }
 }
 
+// JCN
 public static void jcn(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
     int cond = args[0].value & 0xFF;
     if (cond == 0) return;
-
     if (sz == 2) {
-        // 16 位绝对跳（JCN2 / JCN2r）
         int addr = args[1].value & 0xFFFF;
-        vm.setPc(addr);
+        vm.setPc((addr - 1) & 0xFFFF);          // 绝对跳：addr-1
     } else {
-        // 8 位相对跳（JCN）
-        int rel  = (byte) (args[1].value & 0xFF);
+        int rel = (byte)(args[1].value & 0xFF);
         vm.setPc((vm.getPc() + rel) & 0xFFFF);
     }
 }
 
+// JSR
 public static void jsr(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
-    // 返回地址 = 当前 pc 后的下一条指令
     int ret = (vm.getPc() + 1) & 0xFFFF;
     vm.ret().addLast(new Interpreter.StackElem(ret, 2));
-
     if (sz == 2) {
-        // 16 位绝对调用（JSR2 / JSR2r）
         int addr = args[0].value & 0xFFFF;
-        vm.setPc(addr);
+        vm.setPc((addr - 1) & 0xFFFF);          // 绝对调：addr-1
     } else {
-        // 8 位相对调用（JSR）
-        int rel = (byte) (args[0].value & 0xFF);
+        int rel = (byte)(args[0].value & 0xFF);
         vm.setPc((vm.getPc() + rel) & 0xFFFF);
+    }
+}
+
+// JMI  （从活跃栈取绝对地址）
+// public static void jmi(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
+//     Deque<Interpreter.StackElem> S = vm.active(t);
+//     int addr = S.removeLast().value & 0xFFFF;
+//     int ret  = (vm.getPc() + 1) & 0xFFFF;
+//     vm.ret().addLast(new Interpreter.StackElem(ret, 2));
+//     vm.setPc((addr - 1) & 0xFFFF);              // 绝对调：addr-1
+// }
+
+// // JSI  （从活跃栈取绝对地址）
+// public static void jsi(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
+//     Deque<Interpreter.StackElem> S = vm.active(t);
+//     int addr = S.removeLast().value & 0xFFFF;
+//     int ret  = (vm.getPc() + 1) & 0xFFFF;
+//     vm.ret().addLast(new Interpreter.StackElem(ret, 2));
+//     vm.setPc((addr - 1) & 0xFFFF);              // 绝对调：addr-1
+// }
+
+// // JCI  （从活跃栈取 cond 与绝对地址）
+// public static void jci(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
+//     Deque<Interpreter.StackElem> S = vm.active(t);   // ← 你漏了这行
+//     int cond = S.removeLast().value & 0xFF;          // 先弹条件
+//     int addr = S.removeLast().value & 0xFFFF;        // 再弹地址
+//     if (cond != 0) vm.setPc((addr - 1) & 0xFFFF);    // 绝对跳：addr-1
+// }
+
+// 读取当前 pc 之后的大端 16 位立即数：hi 在 pc+1，lo 在 pc+2
+private static int readImm16AtPc(Interpreter vm) {
+    byte[] m = vm.mem();
+    int pc = vm.getPc();
+    int hi = m[(pc + 1) & 0xFFFF] & 0xFF;
+    int lo = m[(pc + 2) & 0xFFFF] & 0xFF;
+    return (hi << 8) | lo;
+}
+
+// JMI: 立即数无条件跳
+public static void jmi(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
+    int addr = readImm16AtPc(vm);
+    // 绝对跳：因为 run() 末尾会 pc++，所以这里设 addr-1
+    vm.setPc((addr - 1) & 0xFFFF);
+}
+
+// JSI: 立即数调用；ret = pc + 3（跳过操作码和两个立即数字节）
+public static void jsi(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
+    int pc  = vm.getPc();
+    int addr = readImm16AtPc(vm);
+    int ret  = (pc + 3) & 0xFFFF;                  // 返回地址：下一条指令
+    vm.ret().addLast(new Interpreter.StackElem(ret, 2));
+    vm.setPc((addr - 1) & 0xFFFF);                 // 绝对调：addr-1
+}
+
+// JCI: 从(活跃)栈弹 1 字节作条件；地址是指令后的 16 位立即数
+public static void jci(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
+    // 条件是 1 字节；若栈顶是 16 位，要只弹低字节并把高字节留在栈上
+    java.util.Deque<Interpreter.StackElem> S = vm.active(t);
+    if (S.isEmpty()) throw new RuntimeException("Stack underflow for JCI");
+    Interpreter.StackElem top = S.removeLast();
+    int cond;
+    if (top.size == 2) {
+        int hi = (top.value >> 8) & 0xFF;
+        cond   =  top.value       & 0xFF;
+        S.addLast(new Interpreter.StackElem(hi, 1));  // 高字节留栈
+    } else {
+        cond = top.value & 0xFF;
+    }
+
+    int pc   = vm.getPc();
+    int addr = readImm16AtPc(vm);
+
+    if (cond != 0) {
+        vm.setPc((addr - 1) & 0xFFFF);              // 跳：addr-1
+    } else {
+        vm.setPc((pc + 2) & 0xFFFF);                // 不跳：跳过 2 个立即数字节（run() 再 pc++）
     }
 }
 
 
 
 
-    // JMI/JSI/JCI 这里按照“从活跃栈取额外参数”的语义实现
-    public static void jmi(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
-        var S = vm.active(t);
-        int addr = S.removeLast().value & 0xFFFF;
-        int ret  = (vm.getPc() + 1) & 0xFFFF;
-        vm.ret().addLast(new Interpreter.StackElem(ret, 2));
-        vm.setPc(addr);
-    }
-    public static void jsi(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
-        var S = vm.active(t);
-        int addr = S.removeLast().value & 0xFFFF;
-        int ret  = (vm.getPc() + 1) & 0xFFFF;
-        vm.ret().addLast(new Interpreter.StackElem(ret, 2));
-        vm.setPc(addr);
-    }
-    public static void jci(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
-        var S = vm.active(t);
-        int cond = S.removeLast().value & 0xFF;
-        int addr = S.removeLast().value & 0xFFFF;
-        if (cond != 0) vm.setPc(addr);
-    }
+
 
     // ===== 内存/设备 =====
     // LDZ: 栈顶为 zero-page 地址（8-bit），读取 sz 宽度的值
-    public static void ldz(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
-        int z = args[0].value & 0xFF;
-        int v = (sz == 2)
-                ? ((vm.mem()[z] & 0xFF) | ((vm.mem()[(z + 1) & 0xFF] & 0xFF) << 8))
-                : (vm.mem()[z] & 0xFF);
-        push(vm, t, v, sz);
-    }
+    // public static void ldz(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
+    //     int z = args[0].value & 0xFF;
+    //     int v = (sz == 2)
+    //             ? ((vm.mem()[z] & 0xFF) | ((vm.mem()[(z + 1) & 0xFF] & 0xFF) << 8))
+    //             : (vm.mem()[z] & 0xFF);
+    //     push(vm, t, v, sz);
+    // }
+// LDZ: zero-page 读（大端）
+public static void ldz(Interpreter vm, Definitions.Token t, StackElem[] args, int sz) {
+    int z = args[0].value & 0xFF;
+    int v = (sz == 2)
+            ? (((vm.mem()[z] & 0xFF) << 8) | (vm.mem()[(z + 1) & 0xFF] & 0xFF))
+            : (vm.mem()[z] & 0xFF);
+    push(vm, t, v, sz);
+}
+
+
+
     // STZ: 值在下、地址在上 => args[0]=value, args[1]=zpage
     public static void stz(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
         int val = args[0].value;
         int z   = args[1].value & 0xFF;
+        // STZ 大端写
         if (sz == 2) {
-            vm.mem()[z] = (byte) (val & 0xFF);
-            vm.mem()[(z + 1) & 0xFF] = (byte) ((val >> 8) & 0xFF);
+            vm.mem()[z] = (byte)((val >> 8) & 0xFF);
+            vm.mem()[(z + 1) & 0xFF] = (byte)(val & 0xFF);
         } else {
-            vm.mem()[z] = (byte) (val & 0xFF);
+            vm.mem()[z] = (byte)(val & 0xFF);
         }
     }
     // LDR/STR: 相对 PC 偏移（8-bit 有符号），按 sz 宽度
@@ -172,8 +236,8 @@ public static void jsr(Interpreter vm, Definitions.Token t, Interpreter.StackEle
         int rel  = (byte) (args[0].value & 0xFF);
         int addr = (vm.getPc() + rel) & 0xFFFF;
         int v = (sz == 2)
-                ? ((vm.mem()[addr] & 0xFF) | ((vm.mem()[(addr + 1) & 0xFFFF] & 0xFF) << 8))
-                : (vm.mem()[addr] & 0xFF);
+        ? (((vm.mem()[addr] & 0xFF) << 8) | (vm.mem()[(addr + 1) & 0xFFFF] & 0xFF))
+        : (vm.mem()[addr] & 0xFF);
         push(vm, t, v, sz);
     }
     public static void str(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
@@ -181,29 +245,54 @@ public static void jsr(Interpreter vm, Definitions.Token t, Interpreter.StackEle
         int rel  = (byte) (args[1].value & 0xFF);
         int addr = (vm.getPc() + rel) & 0xFFFF;
         if (sz == 2) {
-            vm.mem()[addr] = (byte) (val & 0xFF);
-            vm.mem()[(addr + 1) & 0xFFFF] = (byte) ((val >> 8) & 0xFF);
+            vm.mem()[addr] = (byte)((val >> 8) & 0xFF);
+            vm.mem()[(addr + 1) & 0xFFFF] = (byte)(val & 0xFF);
         } else {
-            vm.mem()[addr] = (byte) (val & 0xFF);
+            vm.mem()[addr] = (byte)(val & 0xFF);
         }
     }
-    public static void lda(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
-        int addr = args[0].value & 0xFFFF;
-        int v = (sz == 2)
-                ? ((vm.mem()[addr] & 0xFF) | ((vm.mem()[(addr + 1) & 0xFFFF] & 0xFF) << 8))
-                : (vm.mem()[addr] & 0xFF);
-        push(vm, t, v, sz);
+    // public static void lda(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
+    //     int addr = args[0].value & 0xFFFF;
+    //     int v = (sz == 2)
+    //             ? ((vm.mem()[addr] & 0xFF) | ((vm.mem()[(addr + 1) & 0xFFFF] & 0xFF) << 8))
+    //             : (vm.mem()[addr] & 0xFF);
+    //     push(vm, t, v, sz);
+    // }
+// LDR/LDA: 绝对地址读（大端）
+public static void lda(Interpreter vm, Definitions.Token t, StackElem[] args, int sz) {
+    int addr = args[0].value & 0xFFFF;
+    int v = (sz == 2)
+            ? (((vm.mem()[addr] & 0xFF) << 8) | (vm.mem()[(addr + 1) & 0xFFFF] & 0xFF))
+            : (vm.mem()[addr] & 0xFF);
+    push(vm, t, v, sz);
+}
+
+
+
+    // public static void sta(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
+    //     int val  = args[0].value;
+    //     int addr = args[1].value & 0xFFFF;
+    //     if (sz == 2) {
+    //         vm.mem()[addr] = (byte) (val & 0xFF);
+    //         vm.mem()[(addr + 1) & 0xFFFF] = (byte) ((val >> 8) & 0xFF);
+    //     } else {
+    //         vm.mem()[addr] = (byte) (val & 0xFF);
+    //     }
+    // }
+// STx: 写（大端）
+public static void sta(Interpreter vm, Definitions.Token t, StackElem[] args, int sz) {
+    int val  = args[0].value;
+    int addr = args[1].value & 0xFFFF;
+    if (sz == 2) {
+        vm.mem()[addr] = (byte)((val >> 8) & 0xFF);                  // 高字节在前
+        vm.mem()[(addr + 1) & 0xFFFF] = (byte)(val & 0xFF);          // 低字节在后
+    } else {
+        vm.mem()[addr] = (byte)(val & 0xFF);
     }
-    public static void sta(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
-        int val  = args[0].value;
-        int addr = args[1].value & 0xFFFF;
-        if (sz == 2) {
-            vm.mem()[addr] = (byte) (val & 0xFF);
-            vm.mem()[(addr + 1) & 0xFFFF] = (byte) ((val >> 8) & 0xFF);
-        } else {
-            vm.mem()[addr] = (byte) (val & 0xFF);
-        }
-    }
+}
+
+
+
     // 设备：DEI/DEO 端口在上；DEO 为“值在下、端口在上”
     public static void dei(Interpreter vm, Definitions.Token t, Interpreter.StackElem[] args, int sz) {
         // 简化：未实现其他设备输入，读取 0
