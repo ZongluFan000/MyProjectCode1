@@ -142,16 +142,36 @@ public class Parser {
 
         for (int lineNum = 1; lineNum <= lines.length; lineNum++) {
             String line = lines[lineNum - 1].replace('\t', ' ');
-            String noComment = stripCommentsFSMOnLine(line, depthBox);
+            // String noComment = stripCommentsFSMOnLine(line, depthBox);
 
-            String[] marks = noComment.trim().isEmpty() ? new String[0] : noComment.trim().split("\\s+");
-            for (String mark : marks) {
-                if (mark.isEmpty()) continue;
-                LexerToken lt = parseMark(mark, lineNum, filename);
-                if (lt == null) continue; // [, ] → no-op
-                out.add(lt);
-                lineMapping.add(new int[]{lineNum, filename.hashCode()});
+            // String[] marks = noComment.trim().isEmpty() ? new String[0] : noComment.trim().split("\\s+");
+            // for (String mark : marks) {
+            //     if (mark.isEmpty()) continue;
+            //     LexerToken lt = parseMark(mark, lineNum, filename);
+            //     if (lt == null) continue; // [, ] → no-op
+            //     out.add(lt);
+            //     lineMapping.add(new int[]{lineNum, filename.hashCode()});
+            // }
+
+            String noComment = stripCommentsFSMOnLine(line, depthBox);
+            String s = noComment.trim();
+            int n = s.length(), i = 0;
+            while (i < n) {
+                while (i < n && s.charAt(i) == ' ') i++;
+                int j = i;
+                while (j < n && s.charAt(j) != ' ') j++;
+                if (j > i) {
+                    String mark = s.substring(i, j);
+                    LexerToken lt = parseMark(mark, lineNum, filename);
+                    if (lt != null) {
+                        out.add(lt);
+                        lineMapping.add(new int[]{lineNum, filename.hashCode()});
+                    }
+                }
+                i = j + 1;
             }
+
+
         }
 
         if (depthBox.value != 0) {
@@ -160,7 +180,43 @@ public class Parser {
     }
 
     private static class IntBox { int value; IntBox(int v){ value=v; } }
+/////////////////////////////////////////////////////////////////////////
+// ASCII 十六进制
+private static boolean isHex(String s) {
+    if (s == null || s.isEmpty()) return false;
+    for (int i = 0; i < s.length(); i++) {
+        char c = s.charAt(i);
+        boolean ok = (c >= '0' && c <= '9') ||
+                     (c >= 'a' && c <= 'f') ||
+                     (c >= 'A' && c <= 'F');
+        if (!ok) return false;
+    }
+    return true;
+}
+private static boolean isAZ3(String s) {
+    return s != null && s.length() >= 3 &&
+           (s.charAt(0) >= 'A' && s.charAt(0) <= 'Z') &&
+           (s.charAt(1) >= 'A' && s.charAt(1) <= 'Z') &&
+           (s.charAt(2) >= 'A' && s.charAt(2) <= 'Z');
+}
+private static boolean onlyFlags_2rk(String flags) {
+    for (int i = 0; i < flags.length(); i++) {
+        char c = flags.charAt(i);
+        if (!(c == '2' || c == 'r' || c == 'k')) return false;
+    }
+    return true;
+}
+private static boolean isWordChar(char c) {
+    return (c == '_') ||
+           (c >= '0' && c <= '9') ||
+           (c >= 'A' && c <= 'Z') ||
+           (c >= 'a' && c <= 'z');
+}
+private static boolean identStart(char c) {
+    return (c == '<' || c == '*' || c == '+' || c == '^' || isWordChar(c));
+}
 
+/// ////////////////////////////////////////////////////////////////////
    
     private static String stripCommentsFSMOnLine(String line, IntBox commentDepth) {
         StringBuilder out = new StringBuilder();
@@ -214,140 +270,268 @@ public class Parser {
 
     //parseMark（单词到 LexerToken）
 
+    // private static LexerToken parseMark(String mark, int lineNum, String filename) {
+    //     // include
+    //     if (mark.startsWith("~")) {
+    //         String path = mark.substring(1);
+    //         return LexerToken.ofInclude(path, lineNum, filename);
+    //     }
+    //     // 宏：与 Perl 一致，直接报错
+    //     if (mark.startsWith("%")) {
+    //         throw new RuntimeException("Error: Macros not yet supported at line " + lineNum);
+    //     }
+    //     // 匿名块界定符：no-op
+    //     if (mark.equals("[") || mark.equals("]")) {
+    //         return null;
+    //     }
+    //     // LIT #xx / #xxxx
+    //     if (mark.startsWith("#")) {
+    //         String hex = mark.substring(1);
+    //         if (!hex.matches("[0-9a-fA-F]{2}|[0-9a-fA-F]{4}")) {
+    //             throw new RuntimeException("Error: Constant #" + hex + " must be two or four hex digits at line " + lineNum);
+    //         }
+    //         int sz = (hex.length() == 4) ? 2 : 1;
+    //         return LexerToken.ofLit(hex.toLowerCase(Locale.ROOT), sz, lineNum, filename);
+    //     }
+    //     // 字符串：以空白结束；此处只收集，后面展开为 RAW
+    //     if (mark.startsWith("\"") && mark.length() > 1) {
+    //         return LexerToken.ofStr(mark.substring(1), lineNum, filename);
+    //     }
+    //     // REF：; , . _ - =
+    //     if (mark.matches("^[;,.\\_\\-=].+")) {
+    //         String rune = mark.substring(0,1);
+    //         String val  = mark.substring(1);
+    //         int isChild = 0;
+    //         if (val.contains("&")) { isChild = 1; val = val.replace("&",""); }
+    //         else if (val.contains("/")) { isChild = 2; /* 保留 '/' */ }
+    //         Integer rt = Definitions.REF_TYPE_MAP.get(rune);
+    //         if (rt == null) {
+    //             throw new RuntimeException("Error: Unknown reference rune '" + rune + "' at line " + lineNum);
+    //         }
+    //         return LexerToken.ofRef(val, rt, isChild, lineNum, filename);
+    //     }
+    //     // 标签
+    //     if (mark.startsWith("@")) {
+    //         return LexerToken.ofLabel(mark.substring(1), 2, lineNum, filename); // parent
+    //     }
+    //     if (mark.startsWith("&")) {
+    //         return LexerToken.ofLabel(mark.substring(1), 1, lineNum, filename); // child
+    //     }
+    //     // MAIN
+    //     if (mark.equals("|0100") || mark.equals("|100")) {
+    //         return LexerToken.ofMain(lineNum, filename);
+    //     }
+    //     // 绝对地址 |xxxx
+    //     if (mark.startsWith("|")) {
+    //         String hex = mark.substring(1);
+    //         if (hex.isEmpty() || !hex.matches("[0-9a-fA-F]+")) {
+    //             throw new RuntimeException("Error: Invalid <" + mark + "> at line " + lineNum);
+    //         }
+    //         return LexerToken.ofAddr(hex.toLowerCase(Locale.ROOT), lineNum, filename);
+    //     }
+    //     // 相对填充 $xxxx
+    //     if (mark.startsWith("$")) {
+    //         String hex = mark.substring(1);
+    //         if (hex.isEmpty() || !hex.matches("[0-9a-fA-F]+")) {
+    //             throw new RuntimeException("Error: Invalid <" + mark + "> at line " + lineNum);
+    //         }
+    //         int size = Integer.parseInt(hex, 16);
+    //         return LexerToken.ofPad(hex.toLowerCase(Locale.ROOT), size, lineNum, filename);
+    //     }
+    //     // 条件立即调用 ?{ / ?name
+    //     if (mark.startsWith("?{")) {
+    //         return LexerToken.ofSpecial("Q_LAMBDA_START", "", lineNum, filename);
+    //     }
+    //     if (mark.startsWith("?")) {
+    //         String val = mark.substring(1);
+    //         if (val.isEmpty()) {
+    //             throw new RuntimeException("Error: Invalid <" + mark + "> at line " + lineNum);
+    //         }
+    //         int isChild = 0;
+    //         if (val.contains("&")) { isChild = 1; val = val.replace("&",""); }
+    //         else if (val.contains("/")) { isChild = 1; /* Perl 对 ?child 用 1 */ }
+    //         LexerToken lt = LexerToken.ofSpecial("QCALL", val, lineNum, filename);
+    //         lt.isChild = isChild;
+    //         return lt;
+    //     }
+    //     // 无条件立即跳转 !name
+    //     if (mark.startsWith("!")) {
+    //         String val = mark.substring(1);
+    //         if (val.isEmpty()) {
+    //             throw new RuntimeException("Error: Invalid <" + mark + "> at line " + lineNum);
+    //         }
+    //         int isChild = 0;
+    //         if (val.contains("&")) { isChild = 1; val = val.replace("&",""); }
+    //         else if (val.contains("/")) { isChild = 1; }
+    //         LexerToken lt = LexerToken.ofSpecial("MCALL", val, lineNum, filename);
+    //         lt.isChild = isChild;
+    //         return lt;
+    //     }
+    //     // LAMBDA 块 { / }
+    //     if (mark.equals("{")) {
+    //         return LexerToken.ofSpecial("LAMBDA_START", "", lineNum, filename);
+    //     }
+    //     if (mark.equals("}")) {
+    //         return LexerToken.ofSpecial("LAMBDA_END", "", lineNum, filename);
+    //     }
+    //     // 指令（词法层识别；语义层查表，不存在则降级为立即调用）
+    //     if (mark.matches("^[A-Z]{3}[2rk]*$")) {
+    //         String instr = mark.substring(0,3);
+    //         String flags = (mark.length() > 3) ? mark.substring(3) : "";
+    //         int sz = flags.contains("2") ? 2 : 1;
+    //         int r  = flags.contains("r") ? 1 : 0;
+    //         int k  = flags.contains("k") ? 1 : 0;
+    //         return LexerToken.ofInstr(instr, sz, r, k, lineNum, filename);
+    //     }
+    //     // RAW：严格两位或四位
+    //     if (mark.matches("^[0-9a-fA-F]{2,4}$")) {
+    //         if (mark.length() == 2 || mark.length() == 4) {
+    //             int sz = (mark.length() == 2) ? 1 : 2;
+    //             return LexerToken.ofRaw(mark.toLowerCase(Locale.ROOT), sz, lineNum, filename);
+    //         } else {
+    //             throw new RuntimeException("Error: Invalid token <" + mark + "> at line " + lineNum);
+    //         }
+    //     }
+    //     // 其它 hex 但长度错误 → 报错
+    //     if (mark.matches("^[0-9a-fA-F]+$")) {
+    //         throw new RuntimeException("Error: Invalid number <" + mark + "> at line " + lineNum);
+    //     }
+    //     // 普通标识符 → 立即调用（与 Perl 相同）
+    //     if (mark.matches("^[<\\*\\+\\^\\w].+") || mark.matches("^\\w$")) {
+    //         return LexerToken.ofSpecial("IDENT", mark, lineNum, filename);
+    //     }
+
+    //     throw new RuntimeException("Error: Invalid token <" + mark + "> at line " + lineNum);
+    // }
     private static LexerToken parseMark(String mark, int lineNum, String filename) {
-        // include
-        if (mark.startsWith("~")) {
-            String path = mark.substring(1);
-            return LexerToken.ofInclude(path, lineNum, filename);
+        if (mark == null || mark.isEmpty()) {
+            throw new RuntimeException("Error: Invalid token <> at line " + lineNum);
         }
-        // 宏：与 Perl 一致，直接报错
-        if (mark.startsWith("%")) {
+    
+        // include: ~path
+        if (mark.charAt(0) == '~') {
+            return LexerToken.ofInclude(mark.substring(1), lineNum, filename);
+        }
+    
+        // 宏（与 Perl 一致，直接报错）
+        if (mark.charAt(0) == '%') {
             throw new RuntimeException("Error: Macros not yet supported at line " + lineNum);
         }
+    
         // 匿名块界定符：no-op
-        if (mark.equals("[") || mark.equals("]")) {
+        if (mark.length() == 1 && (mark.charAt(0) == '[' || mark.charAt(0) == ']')) {
             return null;
         }
-        // LIT #xx / #xxxx
-        if (mark.startsWith("#")) {
+    
+        // LIT：#xx / #xxxx
+        if (mark.charAt(0) == '#') {
             String hex = mark.substring(1);
-            if (!hex.matches("[0-9a-fA-F]{2}|[0-9a-fA-F]{4}")) {
-                throw new RuntimeException("Error: Constant #" + hex + " must be two or four hex digits at line " + lineNum);
+            int n = hex.length();
+            if ((n == 2 || n == 4) && isHex(hex)) {
+                int sz = (n == 4) ? 2 : 1;
+                return LexerToken.ofLit(hex.toLowerCase(Locale.ROOT), sz, lineNum, filename);
             }
-            int sz = (hex.length() == 4) ? 2 : 1;
-            return LexerToken.ofLit(hex.toLowerCase(Locale.ROOT), sz, lineNum, filename);
+            throw new RuntimeException("Error: Invalid literal <" + mark + "> at line " + lineNum);
         }
-        // 字符串：以空白结束；此处只收集，后面展开为 RAW
-        if (mark.startsWith("\"") && mark.length() > 1) {
+    
+        // 字符串：以空白结束；这里只收集，后面展开成 RAW
+        if (mark.charAt(0) == '"' && mark.length() > 1) {
             return LexerToken.ofStr(mark.substring(1), lineNum, filename);
         }
-        // REF：; , . _ - =
-        if (mark.matches("^[;,.\\_\\-=].+")) {
-            String rune = mark.substring(0,1);
+    
+        // REF：开头一个字符在 { ; , . _ - = } 之中，并且长度>1
+        char c0 = mark.charAt(0);
+        if ((c0 == ';' || c0 == ',' || c0 == '.' || c0 == '_' || c0 == '-' || c0 == '=') && mark.length() > 1) {
+            String rune = mark.substring(0, 1);
             String val  = mark.substring(1);
             int isChild = 0;
-            if (val.contains("&")) { isChild = 1; val = val.replace("&",""); }
-            else if (val.contains("/")) { isChild = 2; /* 保留 '/' */ }
+            // child/parent 修饰
+            if (val.indexOf('&') >= 0) { isChild = 1; val = val.replace("&", ""); }
+            else if (val.indexOf('/') >= 0) { isChild = 2; /* 保留 '/' */ }
+    
             Integer rt = Definitions.REF_TYPE_MAP.get(rune);
             if (rt == null) {
                 throw new RuntimeException("Error: Unknown reference rune '" + rune + "' at line " + lineNum);
             }
             return LexerToken.ofRef(val, rt, isChild, lineNum, filename);
         }
+    
         // 标签
-        if (mark.startsWith("@")) {
+        if (c0 == '@' && mark.length() > 1) {
             return LexerToken.ofLabel(mark.substring(1), 2, lineNum, filename); // parent
         }
-        if (mark.startsWith("&")) {
+        if (c0 == '&' && mark.length() > 1) {
             return LexerToken.ofLabel(mark.substring(1), 1, lineNum, filename); // child
         }
+    
         // MAIN
         if (mark.equals("|0100") || mark.equals("|100")) {
             return LexerToken.ofMain(lineNum, filename);
         }
+    
         // 绝对地址 |xxxx
-        if (mark.startsWith("|")) {
+        if (c0 == '|' && mark.length() > 1) {
             String hex = mark.substring(1);
-            if (hex.isEmpty() || !hex.matches("[0-9a-fA-F]+")) {
+            if (!isHex(hex)) {
                 throw new RuntimeException("Error: Invalid <" + mark + "> at line " + lineNum);
             }
             return LexerToken.ofAddr(hex.toLowerCase(Locale.ROOT), lineNum, filename);
         }
-        // 相对填充 $xxxx
-        if (mark.startsWith("$")) {
+    
+        // 相对填充 $xxxx （Perl 语义：会写 size+1 个 0）
+        if (c0 == '$' && mark.length() > 1) {
             String hex = mark.substring(1);
-            if (hex.isEmpty() || !hex.matches("[0-9a-fA-F]+")) {
+            if (!isHex(hex)) {
                 throw new RuntimeException("Error: Invalid <" + mark + "> at line " + lineNum);
             }
             int size = Integer.parseInt(hex, 16);
             return LexerToken.ofPad(hex.toLowerCase(Locale.ROOT), size, lineNum, filename);
         }
-        // 条件立即调用 ?{ / ?name
-        if (mark.startsWith("?{")) {
-            return LexerToken.ofSpecial("Q_LAMBDA_START", "", lineNum, filename);
+    
+        // 条件/普通 立即调用语法
+        if (mark.startsWith("?{")) return LexerToken.ofSpecial("Q_LAMBDA_START", "", lineNum, filename);
+        if (c0 == '?' && mark.length() > 1) {
+            String nv = mark.substring(1);
+            if (nv.equals("}")) return LexerToken.ofSpecial("Q_LAMBDA_END", "", lineNum, filename);
+            return LexerToken.ofSpecial("QCALL", nv, lineNum, filename);
         }
-        if (mark.startsWith("?")) {
-            String val = mark.substring(1);
-            if (val.isEmpty()) {
-                throw new RuntimeException("Error: Invalid <" + mark + "> at line " + lineNum);
-            }
-            int isChild = 0;
-            if (val.contains("&")) { isChild = 1; val = val.replace("&",""); }
-            else if (val.contains("/")) { isChild = 1; /* Perl 对 ?child 用 1 */ }
-            LexerToken lt = LexerToken.ofSpecial("QCALL", val, lineNum, filename);
-            lt.isChild = isChild;
-            return lt;
-        }
-        // 无条件立即跳转 !name
-        if (mark.startsWith("!")) {
-            String val = mark.substring(1);
-            if (val.isEmpty()) {
-                throw new RuntimeException("Error: Invalid <" + mark + "> at line " + lineNum);
-            }
-            int isChild = 0;
-            if (val.contains("&")) { isChild = 1; val = val.replace("&",""); }
-            else if (val.contains("/")) { isChild = 1; }
-            LexerToken lt = LexerToken.ofSpecial("MCALL", val, lineNum, filename);
-            lt.isChild = isChild;
-            return lt;
-        }
-        // LAMBDA 块 { / }
-        if (mark.equals("{")) {
-            return LexerToken.ofSpecial("LAMBDA_START", "", lineNum, filename);
-        }
-        if (mark.equals("}")) {
-            return LexerToken.ofSpecial("LAMBDA_END", "", lineNum, filename);
-        }
-        // 指令（词法层识别；语义层查表，不存在则降级为立即调用）
-        if (mark.matches("^[A-Z]{3}[2rk]*$")) {
-            String instr = mark.substring(0,3);
+        if (mark.startsWith("{"))  return LexerToken.ofSpecial("LAMBDA_START", "", lineNum, filename);
+        if (mark.startsWith("}"))  return LexerToken.ofSpecial("LAMBDA_END", "", lineNum, filename);
+    
+        // 指令（词法识别；语义层再查表，不存在则降级为立即调用）
+        if (mark.length() >= 3 && isAZ3(mark)) {
+            String instr = mark.substring(0, 3);
             String flags = (mark.length() > 3) ? mark.substring(3) : "";
-            int sz = flags.contains("2") ? 2 : 1;
-            int r  = flags.contains("r") ? 1 : 0;
-            int k  = flags.contains("k") ? 1 : 0;
-            return LexerToken.ofInstr(instr, sz, r, k, lineNum, filename);
-        }
-        // RAW：严格两位或四位
-        if (mark.matches("^[0-9a-fA-F]{2,4}$")) {
-            if (mark.length() == 2 || mark.length() == 4) {
-                int sz = (mark.length() == 2) ? 1 : 2;
-                return LexerToken.ofRaw(mark.toLowerCase(Locale.ROOT), sz, lineNum, filename);
-            } else {
-                throw new RuntimeException("Error: Invalid token <" + mark + "> at line " + lineNum);
+            if (flags.isEmpty() || onlyFlags_2rk(flags)) {
+                int sz = (flags.indexOf('2') >= 0) ? 2 : 1;
+                int r  = (flags.indexOf('r') >= 0) ? 1 : 0;
+                int k  = (flags.indexOf('k') >= 0) ? 1 : 0;
+                return LexerToken.ofInstr(instr, sz, r, k, lineNum, filename);
             }
         }
-        // 其它 hex 但长度错误 → 报错
-        if (mark.matches("^[0-9a-fA-F]+$")) {
+    
+        // RAW：严格两位或四位
+        if (isHex(mark)) {
+            int n = mark.length();
+            if (n == 2 || n == 4) {
+                int sz = (n == 2) ? 1 : 2;
+                return LexerToken.ofRaw(mark.toLowerCase(Locale.ROOT), sz, lineNum, filename);
+            }
+            // 其它长度的纯 hex → 报错
             throw new RuntimeException("Error: Invalid number <" + mark + "> at line " + lineNum);
         }
-        // 普通标识符 → 立即调用（与 Perl 相同）
-        if (mark.matches("^[<\\*\\+\\^\\w].+") || mark.matches("^\\w$")) {
+    
+        // 普通标识符 → 立即调用（贴近 Perl）
+        char h = mark.charAt(0);
+        boolean headOk = (h == '<' || h == '*' || h == '+' || h == '^'
+                || Character.isLetterOrDigit(h) || h == '_');
+        if (headOk) {
             return LexerToken.ofSpecial("IDENT", mark, lineNum, filename);
         }
-
+    
         throw new RuntimeException("Error: Invalid token <" + mark + "> at line " + lineNum);
     }
-
+    
     //include 展开
 
     private static IncludeResult processIncludes(List<LexerToken> tokens, List<int[]> lineMapping,

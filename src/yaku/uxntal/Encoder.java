@@ -354,10 +354,24 @@ public class Encoder {
         return result;
     }
 
+    // private static int parseHexSafe(String hex) {
+    //     // 容错：允许大小写，不带 0x 前缀
+    //     return Integer.parseInt(hex.trim(), 16);
+    // }
     private static int parseHexSafe(String hex) {
-        // 容错：允许大小写，不带 0x 前缀
-        return Integer.parseInt(hex.trim(), 16);
+        int n = 0;
+        for (int i = 0; i < hex.length(); i++) {
+            char c = hex.charAt(i);
+            int d = (c <= '9') ? (c - '0') :
+                    (c <= 'F') ? (c - 'A' + 10) :
+                                 (c - 'a' + 10);
+            n = (n << 4) | d;
+        }
+        return n;
     }
+    
+
+
 
     private static void ensureCapacity(int memorySize, int pc, int bytesToWrite, String ctx) {
         if (pc < 0 || pc + bytesToWrite > memorySize) {

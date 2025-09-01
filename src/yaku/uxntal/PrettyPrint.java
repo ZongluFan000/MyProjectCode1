@@ -4,350 +4,320 @@ import java.util.*;
 import yaku.uxntal.Definitions.TokenType;
 
 /**
- * PrettyPrint
+ * PrettyPrint (no UxnState dependency)
  *
- * This class merges the previous Java implementation with Perl-parity behaviors:
- * - Stateful prettyPrintStr() that reconstructs source-like output.
- * - JSI/JCI/JMI prefix state ("", "?", "!") applied to the following REF I.
- * - REF child references prepend '&' when isChild==1 and name has no '/'.
- * - Lambda sugar: REF I *_LAMBDA -> "{", LABEL &*_LAMBDA -> "}".
- * - MAIN and BRK newline rules aligned with Perl.
- * - ADDR prints a trailing space; PAD is non-zero-padded hex; STR prints raw.
- * - toHexBytes(...) uses byte-size semantics like Perl's toHex(n, sz).
+ * Utilities to render tokens and memory/state for reports and debugging.
+ * This file intentionally avoids any reference to UxnState so that the
+ * project can compile even when UxnState.java is removed.
  */
-public class PrettyPrint {
+public final class PrettyPrint {
 
-    //Public API
+    private PrettyPrint() {}
 
-    /**
-     * Perl-like, stateful formatter (closest to original Tal source).
-     * @param tokens token list
-     * @param noNewline if true, avoid final newlines where Perl would add them
-     */
+    // -----------------------------------------------------------------------------
+    // High-level pretty printers
+    // -----------------------------------------------------------------------------
+
+    /** Reconstruct a compact source-like string from tokens. */
     public static String prettyPrintStr(List<Token> tokens, boolean noNewline) {
         if (tokens == null || tokens.isEmpty()) return "";
-        String nl = noNewline ? "" : "\n";
-
-        StringBuilder out = new StringBuilder();
-        String prefix = ""; // For JSI/JCI/JMI => "", "?", "!"
-        String mws = " "; // default mid-white-space (space)
-        boolean skip = false;
+        StringBuilder sb = new StringBuilder();
+        String sep = "";
+        String currentParent = "";
 
         for (int i = 0; i < tokens.size(); i++) {
             Token t = tokens.get(i);
-            if (t == null) continue;
+            if (t == null || t.type == TokenType.EMPTY) continue;
 
-            String s = "";
-            mws = " ";
-            skip = false;
-
+            // Basic line breaking heuristics:
+            // - MAIN emits a fresh line and a |0100 sentinel
+            // - Parent LABEL (@foo) starts a new line
+            // - BRK ends the line
             switch (t.type) {
-                case MAIN: {
-                    s = nl + "|0100" + nl;
-                    mws = "";
-                    break;
-                }
-                case LABEL: {
-                    if (t.size == 1) { // child '&'
-                        if (endsWithLambda(t.value)) {
-                            s = "}";
-                        } else {
-                            // if previous isn't newline, start a new line (Perl often does this)
-                            if (out.length() > 0 && out.charAt(out.length() - 1) != '\n') s = nl;
-                            s += "&" + safe(t.value) + nl;
-                        }
-                    } else { // parent '@'
-                        s = nl;
-                        // Perl adds an extra newline if previous ended with !word (approximate with regex)
-                        if (out.toString().matches(".*![\\w\\-]+\n?$")) s += nl;
-                        s += "@" + safe(t.value);
-                        boolean nextIsPad = (i + 1 < tokens.size() && tokens.get(i + 1) != null
-                                && tokens.get(i + 1).type == TokenType.PAD);
-                        s += nextIsPad ? "" : nl;
-                        mws = ""; // align with Perl: no leading space for block labels
+                case MAIN:
+                    if (sb.length() > 0 && sb.charAt(sb.length()-1) != '\n') sb.append('\n');
+                    sb.append("|0100");
+                    if (!noNewline) sb.append('\n');
+                    sep = "";
+                    continue;
+
+                case LABEL:
+                    if (t.size == 2) { // @parent
+                        currentParent = safe(t.value);
+                        if (sb.length() > 0 && sb.charAt(sb.length()-1) != '\n') sb.append('\n');
+                        sb.append("@").append(currentParent);
+                        if (!noNewline) sb.append('\n');
+                        sep = "";
+                        continue;
+                    } else { // &child
+                        if (sb.length() > 0 && sb.charAt(sb.length()-1) != '\n') sb.append('\n');
+                        sb.append("&").append(safe(t.value));
+                        if (!noNewline) sb.append('\n');
+                        sep = "";
+                        continue;
                     }
+
+                default:
                     break;
-                }
-                case REF: {
-                    String rt = refTypeString(t);
-                    boolean isChild = (t.isChild == 1) && !containsSlash(t.value);
-                    String maybeChild = isChild ? "&" : "";
-                    if ("I".equals(rt)) {
-                        if (endsWithLambda(t.value) || t.value.matches("\\d+_LAMBDA")) {
-                            s = "{";
-                        } else {
-                            s = prefix + maybeChild + safe(t.value);
-                        }
-                        prefix = ""; // consume once
-                    } else {
-                        s = rt + maybeChild + safe(t.value);
-                    }
-                    break;
-                }
-                case INSTR: {
-                    String name = safe(t.value);
-                    if ("JSI".equals(name) || "JCI".equals(name) || "JMI".equals(name)) {
-                        prefix = "JSI".equals(name) ? "" : ("JCI".equals(name) ? "?" : "!");
-                        skip = true; // do not print these pseudo-instructions
-                    } else {
-                        s = name + (t.size == 2 ? "2" : "") + (t.stack == 1 ? "r" : "") + (t.keep == 1 ? "k" : "");
-                        // Perl: newline if next is not INSTR
-                        boolean nextIsInstr = (i + 1 < tokens.size() && tokens.get(i + 1) != null
-                                && tokens.get(i + 1).type == TokenType.INSTR);
-                        if (!nextIsInstr) s += nl;
-                        // Perl: prepend a newline before BRK
-                        if ("BRK".equals(name)) s = nl + s;
-                    }
-                    break;
-                }
-                case LIT: {
-                    int bytes = (t.size == 2 ? 2 : 1);
-                    s = "#" + toHexBytes(t.value, bytes);
-                    break;
-                }
-                case RAW: {
-                    int bytes = (t.size == 2 ? 2 : 1);
-                    s = toHexBytes(t.value, bytes);
-                    break;
-                }
-                case ADDR: {
-                    s = "|" + toHexBytes(t.value, 2) + " "; // trailing space
-                    break;
-                }
-                case PAD: {
-                    // Perl: $%x (no zero padding)
-                    long n = parseNumber(t.value);
-                    s = "$" + Long.toHexString(n);
-                    break;
-                }
-                case PLACEHOLDER:
-                case STR:
-                case INCLUDE: {
-                    s = safe(t.value); // raw
-                    break;
-                }
-                case EMPTY: {
-                    skip = true;
-                    break;
-                }
-                default: {
-                    s = t.type + "(" + safe(t.value) + ")";
-                }
             }
 
-            if (!skip) out.append(mws).append(s);
+            // Regular token: append with space
+            if (!sep.isEmpty()) sb.append(sep);
+            sb.append(ppTokenAtom(t, currentParent));
+            sep = " ";
+
+            // add newline after BRK
+            if (t.type == TokenType.INSTR && "BRK".equalsIgnoreCase(t.value)) {
+                if (!noNewline) { sb.append('\n'); sep = ""; }
+            }
         }
-        return out.toString();
+        return sb.toString();
     }
 
-    //Convenience 
+    /** Print to stdout. */
     public static void prettyPrint(List<Token> tokens, boolean noNewline) {
         System.out.print(prettyPrintStr(tokens, noNewline));
-        if (!noNewline) System.out.println();
     }
 
-    //Single-token printer 
+    /** Pretty print a single token (diagnostic). */
     public static String prettyPrintToken(Token t, boolean withIndex) {
-        if (t == null) return "INVALID_TOKEN";
-        String out;
-        switch (t.type) {
-            case MAIN:
-                out = "|0100";
-                break;
-            case LABEL:
-                if (t.size == 1) { // child '&'
-                    out = endsWithLambda(t.value) ? "}" : "&" + safe(t.value);
-                } else {
-                    out = "@" + safe(t.value);
-                }
-                break;
-            case REF: {
-                String rt = refTypeString(t);
-                boolean isChild = (t.isChild == 1) && !containsSlash(t.value);
-                String maybeChild = isChild ? "&" : "";
-                if ("I".equals(rt)) {
-                    out = (endsWithLambda(t.value) || t.value.matches("\\d+_LAMBDA")) ? "{" : (maybeChild + safe(t.value));
-                } else {
-                    out = rt + maybeChild + safe(t.value);
-                }
-                break;
-            }
-            case INSTR:
-                out = safe(t.value) + (t.size == 2 ? "2" : "") + (t.stack == 1 ? "r" : "") + (t.keep == 1 ? "k" : "");
-                break;
-            case LIT:
-                out = "#" + toHexBytes(t.value, (t.size == 2 ? 2 : 1));
-                break;
-            case RAW:
-                out = toHexBytes(t.value, (t.size == 2 ? 2 : 1));
-                break;
-            case ADDR:
-                out = "|" + toHexBytes(t.value, 2) + " ";
-                break;
-            case PAD: {
-                long n = parseNumber(t.value);
-                out = "$" + Long.toHexString(n);
-                break;
-            }
-            case STR:
-            case INCLUDE:
-                out = safe(t.value);
-                break;
-            case EMPTY:
-                out = "";
-                break;
-            default:
-                out = t.type + "(" + safe(t.value) + ")";
-        }
-        int __li = tokenLine(t);
-        if (withIndex && __li >= 0) out += "[" + __li + "]";
-        return out;
+        if (t == null) return "∅";
+        String core = String.format("%s('%s', sz=%d, r=%d, k=%d, refType=%d, isChild=%d, line=%d)",
+                t.type, t.value, t.size, t.stack, t.keep, t.refType, t.isChild, t.lineNum);
+        return withIndex ? core : core;
     }
 
-    //Simple linear token list printer 
+    /** Render a token list with optional indices and a maximum count per line. */
     public static String prettyPrintTokens(List<Token> tokens, boolean showIndices, int maxPerLine) {
-        if (tokens == null || tokens.isEmpty()) return "[]";
+        if (tokens == null) return "";
+        if (maxPerLine <= 0) maxPerLine = Integer.MAX_VALUE;
         StringBuilder sb = new StringBuilder();
-        int count = 0;
-        for (Token token : tokens) {
-            sb.append(prettyPrintToken(token, showIndices)).append(" ");
-            count++;
-            if (maxPerLine > 0 && count % maxPerLine == 0) sb.append("\n");
+        int n = tokens.size();
+        for (int i = 0; i < n; i++) {
+            if (i > 0) sb.append(' ');
+            if (showIndices) sb.append('[').append(i).append("] ");
+            sb.append(ppTokenAtom(tokens.get(i), ""));
+            if ((i + 1) % maxPerLine == 0) sb.append('\n');
         }
-        return sb.toString().trim();
+        if (sb.length() > 0 && sb.charAt(sb.length()-1) != '\n') sb.append('\n');
+        return sb.toString();
     }
 
-    //Grouped by token type 
+    /** Group tokens by type for debugging (counts only). */
     public static String prettyPrintGrouped(List<Token> tokens, boolean showTypes, boolean showIndices, String indent) {
-        Map<TokenType, List<Token>> groups = new LinkedHashMap<>();
-        for (Token token : tokens) groups.computeIfAbsent(token.type, k -> new ArrayList<>()).add(token);
+        if (tokens == null) return "";
+        Map<TokenType, List<Token>> groups = new EnumMap<>(TokenType.class);
+        for (Token t : tokens) {
+            groups.computeIfAbsent(t.type, k -> new ArrayList<>()).add(t);
+        }
         StringBuilder sb = new StringBuilder();
         for (Map.Entry<TokenType, List<Token>> e : groups.entrySet()) {
             sb.append(e.getKey()).append(" (").append(e.getValue().size()).append("):\n");
-            for (Token token : e.getValue()) sb.append(indent).append(prettyPrintToken(token, showIndices)).append("\n");
-            sb.append("\n");
+            for (int i = 0; i < e.getValue().size(); i++) {
+                sb.append(indent == null ? "" : indent);
+                if (showIndices) sb.append('[').append(i).append("] ");
+                sb.append(ppTokenAtom(e.getValue().get(i), ""));
+                sb.append('\n');
+            }
+            sb.append('\n');
         }
         return sb.toString();
     }
 
-    //UxnState helpers 
+    // -----------------------------------------------------------------------------
+    //  State/Memory pretty printers without UxnState
+    // -----------------------------------------------------------------------------
 
-    public static String prettyPrintUxnState(UxnState uxn) {
+    /** Render a compact CPU-state snapshot without depending on UxnState. */
+    public static String prettyPrintState(int pc, int free, boolean hasMain,
+                                          Deque<?> workingStack, Deque<?> returnStack) {
         StringBuilder sb = new StringBuilder();
         sb.append("=== UXN State ===\n");
-        sb.append("PC: 0x").append(toHexBytes(uxn.pc, 2)).append("\n");
-        sb.append("Free: 0x").append(toHexBytes(uxn.free, 2)).append("\n");
-        sb.append("Has Main: ").append(uxn.hasMain).append("\n");
-        try {
-            sb.append("Working Stack (").append(uxn.stackPtr[0]).append("): ").append(uxn.stacksToString(0)).append("\n");
-            sb.append("Return Stack (").append(uxn.stackPtr[1]).append("): ").append(uxn.stacksToString(1)).append("\n");
-        } catch (Throwable ignore) { }
-        // Avoid depending on symbolTable internals to keep this generic
+        sb.append("PC:  0x").append(toHexBytes(pc, 2)).append('\n');
+        sb.append("End: 0x").append(toHexBytes(free, 2)).append('\n');
+        sb.append("Has Main: ").append(hasMain).append('\n');
+        sb.append("Working Stack: ").append(stackToString(workingStack)).append('\n');
+        sb.append("Return  Stack: ").append(stackToString(returnStack)).append('\n');
         return sb.toString();
     }
 
-    public static String prettyPrintMemory(UxnState uxn, int start, int end) {
-        if (end <= start) end = Math.min(uxn.free, start + 256);
+    /** Hex-dump a slice of memory without depending on UxnState. */
+    public static String prettyPrintMemory(byte[] memory, int start, int end) {
+        if (memory == null) return "(memory=null)";
+        int n = memory.length;
+        if (start < 0) start = 0;
+        if (end <= start || end > n) end = Math.min(n, start + 256);
+
         StringBuilder sb = new StringBuilder();
-        sb.append("=== Memory Dump (0x").append(toHexBytes(start, 2)).append(" - 0x").append(toHexBytes(end, 2)).append(") ===\n");
+        sb.append("=== Memory Dump (0x").append(toHexBytes(start, 2))
+          .append(" - 0x").append(toHexBytes(end, 2)).append(") ===\n");
+
         for (int addr = start; addr < end; addr += 16) {
             StringBuilder lineBytes = new StringBuilder();
             StringBuilder lineChars = new StringBuilder();
-            for (int i = 0; i < 16 && addr + i < end; i++) {
-                int byteVal = 0;
-                Object cell = uxn.memory[addr + i];
-                if (cell instanceof Token) {
-                    String val = ((Token) cell).value;
-                    byteVal = (int) (parseNumber(val) & 0xFF);
-                } else if (cell instanceof Integer) {
-                    byteVal = (Integer) cell;
-                }
-                lineBytes.append(toHexBytes(byteVal, 1)).append(" ");
-                lineChars.append((byteVal >= 32 && byteVal <= 126) ? (char) byteVal : '.');
+            int limit = Math.min(16, end - addr);
+            for (int i = 0; i < limit; i++) {
+                int b = memory[addr + i] & 0xFF;
+                if (i > 0) lineBytes.append(' ');
+                lineBytes.append(toHexBytes(b, 1));
+                char c = (b >= 32 && b <= 126) ? (char)b : '.';
+                lineChars.append(c);
             }
             sb.append(toHexBytes(addr, 2)).append(": ")
-              .append(String.format("%-47s", lineBytes)).append(" |")
-              .append(lineChars).append("|\n");
+              .append(padRight(lineBytes.toString(), 16 * 3 - 1))
+              .append("  ")
+              .append(lineChars)
+              .append('\n');
         }
         return sb.toString();
-        }
-
-    //Helpers
-
-   
-    private static int tokenLine(Token t) {
-        try {
-            java.lang.reflect.Field f = Token.class.getDeclaredField("line");
-            f.setAccessible(true);
-            return f.getInt(t);
-        } catch (Throwable ignore) {
-            return -1;
-        }
     }
 
-    private static String refTypeString(Token t) {
-        try {
-            if (t.refType >= 0 && t.refType < Definitions.REV_REF_TYPES.length)
-                return Definitions.REV_REF_TYPES[t.refType];
-        } catch (Throwable ignore) { }
-        return "?";
-    }
+    // -----------------------------------------------------------------------------
+    //  Low-level helpers
+    // -----------------------------------------------------------------------------
 
-    private static boolean containsSlash(String s) {
-        return s != null && s.indexOf('/') >= 0;
-    }
-
-    private static boolean endsWithLambda(String s) {
-        return s != null && s.endsWith("_LAMBDA");
-    }
-
-    private static String safe(String s) {
-        return s == null ? "" : s;
-    }
-
-    //Parse decimal or hex string, trimming optional _N suffix
-    private static long parseNumber(String s) {
-        if (s == null || s.isEmpty()) return 0L;
-        String v = s;
-        int us = v.lastIndexOf('_');
-        if (us > 0 && us == v.length() - 2 && Character.isDigit(v.charAt(us + 1))) {
-            v = v.substring(0, us); // drop _N suffix
-        }
-        try {
-            if (v.matches("^-?\\d+$")) return Long.parseLong(v);
-            return Long.parseLong(v, 16);
-        } catch (Exception e) {
-            return 0L;
+    private static String ppTokenAtom(Token t, String currentParent) {
+        if (t == null) return "";
+        switch (t.type) {
+            case MAIN: return "|0100";
+            case LABEL:
+                return (t.size == 2 ? "@" : "&") + safe(t.value);
+            case LIT:
+                return "#" + toHexBytes(parseNumber(t.value), t.size);
+            case RAW:
+                return t.value; // already hex string of 2 or 4 nibbles
+            case ADDR:
+                return "|" + t.value;
+            case PAD:
+                return "$" + t.value;
+            case STR:
+                return "\"" + (t.value == null ? "" : t.value) + "\"";
+            case REF:
+            case IREF:
+                String rune = refRune(t.refType);
+                String name = safe(t.value);
+                if (t.isChild == 1 && name.indexOf('/') < 0 && currentParent != null && !currentParent.isEmpty()) {
+                    name = currentParent + "/" + name;
+                }
+                if (t.refType == 6) { // IREF special "I" rune
+                    return "I" + name;
+                }
+                return rune + name;
+            case INSTR:
+                String suffix = (t.size == 2 ? "2" : "") + (t.stack == 1 ? "r" : "") + (t.keep == 1 ? "k" : "");
+                return t.value + suffix;
+            default:
+                return t.type + (t.value != null ? "(" + t.value + ")" : "");
         }
     }
 
-    //format as hex with a given byte width 
+    private static String refRune(int refType) {
+        if (refType >= 0 && refType < Definitions.REV_REF_TYPES.length) {
+            return Definitions.REV_REF_TYPES[refType];
+        }
+        return ".";
+    }
+
+    private static String safe(String s) { return (s == null) ? "" : s; }
+
+    private static String padRight(String s, int len) {
+        if (s.length() >= len) return s;
+        StringBuilder sb = new StringBuilder(len);
+        sb.append(s);
+        while (sb.length() < len) sb.append(' ');
+        return sb.toString();
+    }
+
+    /** Parse numeric string in decimal/hex ("0x" or without) used by some tokens. */
+    private static long parseNumber(String val) {
+        if (val == null || val.isEmpty()) return 0L;
+        String s = val.trim();
+        int base = 10;
+        int i = 0;
+        if (s.startsWith("0x") || s.startsWith("0X")) {
+            base = 16; i = 2;
+        }
+        long n = 0;
+        for (; i < s.length(); i++) {
+            char c = s.charAt(i);
+            int d;
+            if (c >= '0' && c <= '9') d = c - '0';
+            else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
+            else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
+            else continue;
+            n = (n * base) + d;
+        }
+        return n;
+    }
+
+    /** Hex string of exactly {@code bytes} bytes (2*bytes hex digits), wrapping like unsigned. */
     public static String toHexBytes(long n, int bytes) {
         long mod = 1L << (bytes * 8);
-        if (n < 0) n = (n + mod) & (mod - 1);
+        long v = ((n % mod) + mod) % mod;
+        String s = Long.toHexString(v).toLowerCase(Locale.ROOT);
         int digits = bytes * 2;
-        return String.format("%0" + digits + "x", n & (mod - 1));
+        if (s.length() < digits) {
+            StringBuilder sb = new StringBuilder(digits);
+            for (int i = s.length(); i < digits; i++) sb.append('0');
+            sb.append(s);
+            return sb.toString();
+        }
+        if (s.length() > digits) return s.substring(s.length() - digits);
+        return s;
     }
 
-    //Overload: parse then format with byte width
     public static String toHexBytes(String val, int bytes) {
         return toHexBytes(parseNumber(val), bytes);
     }
 
-    //Compatibility with prior code 
-
-    //Prior code used digit width; keep a wrapper for compatibility
     public static String toHex(String val, int digits) {
         long n = parseNumber(val);
         long mod = 1L << (digits * 4);
         if (n < 0) n = (n + mod) & (mod - 1);
-        return String.format("%0" + digits + "x", n & (mod - 1));
+        String s = Long.toHexString(n & (mod - 1));
+        if (s.length() < digits) {
+            StringBuilder sb = new StringBuilder(digits);
+            for (int i = s.length(); i < digits; i++) sb.append('0');
+            sb.append(s);
+            return sb.toString();
+        }
+        if (s.length() > digits) return s.substring(s.length() - digits);
+        return s;
     }
 
     public static String toHex(int val, int digits) {
         long n = val;
         long mod = 1L << (digits * 4);
         if (n < 0) n = (n + mod) & (mod - 1);
-        return String.format("%0" + digits + "x", n & (mod - 1));
+        String s = Long.toHexString(n & (mod - 1));
+        if (s.length() < digits) {
+            StringBuilder sb = new StringBuilder(digits);
+            for (int i = s.length(); i < digits; i++) sb.append('0');
+            sb.append(s);
+            return sb.toString();
+        }
+        if (s.length() > digits) return s.substring(s.length() - digits);
+        return s;
+    }
+
+    private static String stackToString(Deque<?> stack) {
+        if (stack == null) return "[]";
+        StringBuilder sb = new StringBuilder("[");
+        boolean first = true;
+        for (Object o : stack) {
+            if (!first) sb.append(", ");
+            first = false;
+            if (o instanceof Number) {
+                long v = ((Number) o).longValue();
+                sb.append("0x").append(toHexBytes(v, 1));
+            } else if (o instanceof Token) {
+                Token t = (Token) o;
+                sb.append(ppTokenAtom(t, ""));
+            } else {
+                sb.append(String.valueOf(o));
+            }
+        }
+        sb.append("]");
+        return sb.toString();
     }
 }

@@ -85,14 +85,15 @@ public final class Main {
     //Assembly flow
 
     private static AsmBundle assemble(String talPath) throws Exception {
-        UxnState ourUxn = new UxnState();
+      
 
         
         Class<?> parserK = Class.forName("yaku.uxntal.Parser");
         Method pMethod = selectParserMethod(parserK);
         Object parserInstance = Modifier.isStatic(pMethod.getModifiers()) ? null : newInstance(parserK);
 
-        Object[] pArgs = buildParserArgs(pMethod, talPath, ourUxn);
+        Object[] pArgs = buildParserArgs(pMethod, talPath);
+
         Object parseRes = invoke(pMethod, parserInstance, pArgs);
 
         List<?> tokens = getFieldOrNull(parseRes, "tokens", List.class);
@@ -159,28 +160,18 @@ public final class Main {
         return 3;
     }
 
-    private static Object[] buildParserArgs(Method m, String talPath, UxnState ourUxn) throws Exception {
+    private static Object[] buildParserArgs(Method m, String talPath) throws Exception {
         Class<?>[] pt = m.getParameterTypes();
-        if (pt.length == 1) {
-            if (pt[0] != String.class) throw new IllegalStateException("Parser method takes 1 param but not String.");
+        if (pt.length == 1 && pt[0] == String.class) {
             return new Object[]{ talPath };
-        } else if (pt.length == 2) {
-            if (pt[0] != String.class) throw new IllegalStateException("Parser method 1st param must be String.");
-            Class<?> uxnt = pt[1];
-            Object uxnArg;
-            if (uxnt.isAssignableFrom(UxnState.class)) {
-                uxnArg = ourUxn;
-            } else {
-                Constructor<?> c = uxnt.getDeclaredConstructor();
-                c.setAccessible(true);
-                uxnArg = c.newInstance();
-            }
-            return new Object[]{ talPath, uxnArg };
-        } else {
-            throw new IllegalStateException("Parser method param count not supported: " + pt.length);
+        } else if (pt.length == 2 && pt[0] == String.class) {
+            Constructor<?> c = pt[1].getDeclaredConstructor();
+            c.setAccessible(true);
+            Object second = c.newInstance();
+            return new Object[]{ talPath, second };
         }
+        throw new IllegalStateException("Parser method param count not supported: " + pt.length);
     }
-
     //Encoder reflection
 
     private static Object tryCallEncode(Class<?> encK, List<?> tokens, Object uxnObj) throws Exception {
