@@ -14,9 +14,7 @@ public final class PrettyPrint {
 
     private PrettyPrint() {}
 
-    // -----------------------------------------------------------------------------
-    // High-level pretty printers
-    // -----------------------------------------------------------------------------
+ 
 
     /** Reconstruct a compact source-like string from tokens. */
     public static String prettyPrintStr(List<Token> tokens, boolean noNewline) {
@@ -124,9 +122,7 @@ public final class PrettyPrint {
         return sb.toString();
     }
 
-    // -----------------------------------------------------------------------------
-    //  State/Memory pretty printers without UxnState
-    // -----------------------------------------------------------------------------
+  
 
     /** Render a compact CPU-state snapshot without depending on UxnState. */
     public static String prettyPrintState(int pc, int free, boolean hasMain,
@@ -172,9 +168,7 @@ public final class PrettyPrint {
         return sb.toString();
     }
 
-    // -----------------------------------------------------------------------------
-    //  Low-level helpers
-    // -----------------------------------------------------------------------------
+   
 
     private static String ppTokenAtom(Token t, String currentParent) {
         if (t == null) return "";

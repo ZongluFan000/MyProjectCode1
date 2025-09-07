@@ -132,34 +132,34 @@ public class Assembler {
 
     
     //将 Token 转成一个字节
-    private static byte tokenToByte(Token token) {
-        if (token == null) return 0;
-        if (token.type == Definitions.TokenType.INSTR) {
-            return instructionToByte(token);
-        }
-        try {
-            return (byte) (Integer.parseInt(token.value, 16) & 0xFF);
-        } catch (Exception e) {
-            return 0;
-        }
-    }
+    // private static byte tokenToByte(Token token) {
+    //     if (token == null) return 0;
+    //     if (token.type == Definitions.TokenType.INSTR) {
+    //         return instructionToByte(token);
+    //     }
+    //     try {
+    //         return (byte) (Integer.parseInt(token.value, 16) & 0xFF);
+    //     } catch (Exception e) {
+    //         return 0;
+    //     }
+    // }
 
     //指令编码
-    private static byte instructionToByte(Token token) {
-        String baseName = token.value.substring(0, Math.min(3, token.value.length())).toUpperCase(); // 防御性截断
-        boolean shortMode = token.size == 2;
-        boolean returnMode = token.stack != 0;
-        boolean keepMode = token.keep != 0;
-        return (byte) Definitions.getOpcodeByte(baseName, shortMode, returnMode, keepMode);
-    }
+    // private static byte instructionToByte(Token token) {
+    //     String baseName = token.value.substring(0, Math.min(3, token.value.length())).toUpperCase(); // 防御性截断
+    //     boolean shortMode = token.size == 2;
+    //     boolean returnMode = token.stack != 0;
+    //     boolean keepMode = token.keep != 0;
+    //     return (byte) Definitions.getOpcodeByte(baseName, shortMode, returnMode, keepMode);
+    // }
 
   
     //除尾部零字节
-    private static byte[] trimTrailingZeros(byte[] bytes) {
-        int endIndex = bytes.length - 1;
-        while (endIndex >= 0 && bytes[endIndex] == 0) endIndex--;
-        return Arrays.copyOf(bytes, endIndex + 1);
-    }
+    // private static byte[] trimTrailingZeros(byte[] bytes) {
+    //     int endIndex = bytes.length - 1;
+    //     while (endIndex >= 0 && bytes[endIndex] == 0) endIndex--;
+    //     return Arrays.copyOf(bytes, endIndex + 1);
+    // }
 
     //十六进制转储
     public static String createHexDump(byte[] bytes, int bytesPerLine) {

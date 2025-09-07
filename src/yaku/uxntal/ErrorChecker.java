@@ -137,9 +137,9 @@ public final class ErrorChecker {
         return map;
     }
 
-    // -------------------------------------------------------------------------
+    // 
     // Helpers
-    // -------------------------------------------------------------------------
+    // 
 
     // private static Token makeEmpty() {
     //     Token t = new Token();

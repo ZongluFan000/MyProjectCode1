@@ -9,7 +9,7 @@ public class Interpreter {
     public static final int MAX_INSTRUCTIONS = 1_000_000;
     private static final int MEM_MASK = 0xFFFF;
 
-    // -------- Stack element --------
+    //Stack element
     public static class StackElem {
         public final int value; // 0..0xFFFF
         public final int size;  // 1=byte, 2=short
@@ -25,7 +25,7 @@ public class Interpreter {
         }
     }
 
-    // -------- VM state --------
+    // VM state
     private final byte[] memory;
     private final List<Definitions.Token> tokens;
     // 反向符号表：值可能是 Definitions.Token 或 Encoder.ReverseEntry
@@ -37,7 +37,7 @@ public class Interpreter {
     private static final Definitions.Token[] OPCODE_TOKEN_CACHE = new Definitions.Token[256];
     /// /////////////////////////////////////////////////////////////////
 
-    // === 按字节解码用 ===
+    // 按字节解码用
     private static final String[] BASE_NAMES = new String[32];
     static {
         for (var e : BASE_OPCODE_MAP.entrySet()) {
@@ -72,92 +72,7 @@ private static boolean isFixedOpcode(int op) {
     private final StackElem[] argsBuf = new StackElem[3];
 
 
-    // private Definitions.Token decodeAtPc(int atPc) {
-    //     // int op = readByte(atPc) & 0xFF;
-
-    //     // // 固定编码
-    //     // if (op == 0x00) return new Definitions.Token(TokenType.INSTR, "BRK", 1, 0, 0, 0);
-    //     // if (op == 0x20) return new Definitions.Token(TokenType.INSTR, "JCI", 1, 0, 0, 0);
-    //     // if (op == 0x40) return new Definitions.Token(TokenType.INSTR, "JMI", 1, 0, 0, 0);
-    //     // if (op == 0x60) return new Definitions.Token(TokenType.INSTR, "JSI", 1, 0, 0, 0);
-
-    //     // // LIT：高位 1，s/r/k 位
-    //     // if ((op & 0x80) != 0) {
-    //     //     int size  = ((op & MODE_SHORT)  != 0) ? 2 : 1;
-    //     //     int rbit  = ((op & MODE_RETURN) != 0) ? 1 : 0;
-    //     //     int kbit  = ((op & MODE_KEEP)   != 0) ? 1 : 0;
-    //     //     return new Definitions.Token(TokenType.LIT, "", size, rbit, kbit, 0);
-    //     // }
-
-    //     // // 普通指令：低 5 位为基码，0x10/0x20/0x40 为 k/s/r
-    //     // int base = op & 0x1F;
-    //     // String name = (base >= 0 && base < BASE_NAMES.length) ? BASE_NAMES[base] : null;
-    //     // if (name == null || name.isEmpty()) return null;
-    //     // int size  = ((op & MODE_SHORT)  != 0) ? 2 : 1;
-    //     // int rbit  = ((op & MODE_RETURN) != 0) ? 1 : 0;
-    //     // int kbit  = ((op & MODE_KEEP)   != 0) ? 1 : 0;
-    //     // return new Definitions.Token(TokenType.INSTR, name, size, rbit, kbit, 0);
-
-
-
-    //     // int op = readByte(pc) & 0xFF;
-
-    //     // Definitions.Token cached = OPCODE_TOKEN_CACHE[op];
-    //     // if (cached != null) return cached;
-    
-    //     // Definitions.Token t;
-    //     // if ((op & 0x80) != 0) { // LIT
-    //     //     int size = ((op & MODE_SHORT)  != 0) ? 2 : 1;
-    //     //     int rbit = ((op & MODE_RETURN) != 0) ? 1 : 0;
-    //     //     int kbit = ((op & MODE_KEEP)   != 0) ? 1 : 0;
-    //     //     t = new Definitions.Token(TokenType.LIT, "", size, rbit, kbit, 0);
-    //     // } else {
-    //     //     int base = op & 0x1F;
-    //     //     String name = (base >= 0 && base < BASE_NAMES.length) ? BASE_NAMES[base] : null;
-    //     //     if (name == null || name.isEmpty()) return null;
-    //     //     int size = ((op & MODE_SHORT)  != 0) ? 2 : 1;
-    //     //     int rbit = ((op & MODE_RETURN) != 0) ? 1 : 0;
-    //     //     int kbit = ((op & MODE_KEEP)   != 0) ? 1 : 0;
-    //     //     t = new Definitions.Token(TokenType.INSTR, name, size, rbit, kbit, 0);
-    //     // }
-    //     // OPCODE_TOKEN_CACHE[op] = t;
-    //     // return t;
-        
-    //         int op = readByte(atPc) & 0xFF;
-        
-    //         // —— 固定编码（忽略 s/r/k 位）——
-    //         if (op == 0x00) return OPCODE_TOKEN_CACHE[op] != null ? OPCODE_TOKEN_CACHE[op]
-    //                           : (OPCODE_TOKEN_CACHE[op] = new Definitions.Token(TokenType.INSTR, "BRK", 1, 0, 0, 0));
-    //         if (op == 0x20) return OPCODE_TOKEN_CACHE[op] != null ? OPCODE_TOKEN_CACHE[op]
-    //                           : (OPCODE_TOKEN_CACHE[op] = new Definitions.Token(TokenType.INSTR, "JCI", 1, 0, 0, 0));
-    //         if (op == 0x40) return OPCODE_TOKEN_CACHE[op] != null ? OPCODE_TOKEN_CACHE[op]
-    //                           : (OPCODE_TOKEN_CACHE[op] = new Definitions.Token(TokenType.INSTR, "JMI", 1, 0, 0, 0));
-    //         if (op == 0x60) return OPCODE_TOKEN_CACHE[op] != null ? OPCODE_TOKEN_CACHE[op]
-    //                           : (OPCODE_TOKEN_CACHE[op] = new Definitions.Token(TokenType.INSTR, "JSI", 1, 0, 0, 0));
-        
-    //         // —— LIT：高位 1，带 s/r/k 位 —— 
-    //         if ((op & 0x80) != 0) {
-    //             int size  = ((op & MODE_SHORT)  != 0) ? 2 : 1;
-    //             int rbit  = ((op & MODE_RETURN) != 0) ? 1 : 0;
-    //             int kbit  = ((op & MODE_KEEP)   != 0) ? 1 : 0;
-    //             Definitions.Token t = new Definitions.Token(TokenType.LIT, "", size, rbit, kbit, 0);
-    //             OPCODE_TOKEN_CACHE[op] = t;
-    //             return t;
-    //         }
-        
-    //         // —— 普通基码：低 5 位为基码，0x10/0x20/0x40 为 k/s/r —— 
-    //         int base = op & 0x1F;
-    //         String name = (base >= 0 && base < BASE_NAMES.length) ? BASE_NAMES[base] : null;
-    //         if (name == null || name.isEmpty()) return null;
-    //         int size  = ((op & MODE_SHORT)  != 0) ? 2 : 1;
-    //         int rbit  = ((op & MODE_RETURN) != 0) ? 1 : 0;
-    //         int kbit  = ((op & MODE_KEEP)   != 0) ? 1 : 0;
-    //         Definitions.Token t = new Definitions.Token(TokenType.INSTR, name, size, rbit, kbit, 0);
-    //         OPCODE_TOKEN_CACHE[op] = t;
-    //         return t;
-        
-        
-    // }
+ 
     private Definitions.Token decodeAtPc(int atPc) {
         int op = readByte(atPc) & 0xFF;
     
@@ -165,7 +80,7 @@ private static boolean isFixedOpcode(int op) {
         Definitions.Token cached = OPCODE_TOKEN_CACHE[op];
         if (cached != null) return cached;
     
-        // —— 固定编码（忽略 s/r/k 位）——
+        // 固定编码（忽略 s/r/k 位）
         if (op == 0x00) { // BRK
             Definitions.Token t = new Definitions.Token(TokenType.INSTR, "BRK", 1, 0, 0, 0);
             return OPCODE_TOKEN_CACHE[op] = t;
@@ -183,7 +98,7 @@ private static boolean isFixedOpcode(int op) {
             return OPCODE_TOKEN_CACHE[op] = t;
         }
     
-        // —— LIT：高位 1（带 s/r/k 位）——
+        // LIT：高位 1（带 s/r/k 位）
         if ((op & 0x80) != 0) {
             int size  = ((op & MODE_SHORT)  != 0) ? 2 : 1;
             int rbit  = ((op & MODE_RETURN) != 0) ? 1 : 0;
@@ -192,7 +107,7 @@ private static boolean isFixedOpcode(int op) {
             return OPCODE_TOKEN_CACHE[op] = t;
         }
     
-        // —— 普通基码：低 5 位为基码，0x10/0x20/0x40 为 k/s/r —— 
+        //普通基码：低 5 位为基码，0x10/0x20/0x40 为 k/s/r
         int base = op & 0x1F;
         String name = (base >= 0 && base < BASE_NAMES.length) ? BASE_NAMES[base] : null;
         if (name == null || name.isEmpty()) return null;
@@ -216,7 +131,7 @@ private static boolean isFixedOpcode(int op) {
     private final Deque<String> callStack = new ArrayDeque<>();
     private String currentParent = "<main>";
 
-    // -------- 构造 --------
+    // 构造 
     public Interpreter(byte[] memory,
                        List<Definitions.Token> tokens,
                        Map<Integer, Definitions.Token> reverseSymbolTable) {
@@ -227,14 +142,14 @@ private static boolean isFixedOpcode(int op) {
         callStack.push(currentParent);
     }
 
-    // -------- 活跃栈（由 r 位决定）--------
+    // 活跃栈（由 r 位决定）
     public Deque<StackElem> active(Definitions.Token t) {
         return (t.stack == 1) ? returnStack : workStack;
     }
     public Deque<StackElem> work()  { return workStack; }
     public Deque<StackElem> ret()   { return returnStack; }
 
-    // -------- Memory helpers --------
+    // Memory helpers 
     int readByte(int addr) { return memory[addr & MEM_MASK] & 0xFF; }
 
     // 大端读 16 位
@@ -257,35 +172,10 @@ private static boolean isFixedOpcode(int op) {
 
     static int maskBySize(int v, int sz) { return (sz == 2) ? (v & 0xFFFF) : (v & 0xFF); }
 
-    // -------- Run --------
+    //Run 
     public void run() {
         try {
-            // while (!halted && pc >= 0 && pc < memory.length) {
-            //     if (++instructionCount > MAX_INSTRUCTIONS)
-            //         throw new RuntimeException("Max instruction count exceeded (可能死循环)");
-
-            //     // Object entry = reverseSymbolTable.get(pc);
-            //     // Definitions.Token t = tokenFromAny(entry, pc);
-            //     // if (t == null || (t.type != TokenType.INSTR && t.type != TokenType.LIT)) {
-            //     //     t = decodeAtPc(pc);
-            //     //     if (t == null) { // 真是数据
-            //     //         pc++;
-            //     //         continue;
-            //     //     }
-            //     // }
-            //     Definitions.Token t = decodeAtPc(pc);
-            //     if (t == null) { pc++; continue; }
-
-                
-
-            //     if (t.type == TokenType.INSTR) {
-            //         handleCallTracking(t);
-            //         halted = executeInstr(t);
-            //     } else if (t.type == TokenType.LIT) {
-            //         pushLiteral(t);
-            //     }
-            //     pc++;
-            // }
+            
             while (!halted && pc >= 0 && pc < memory.length) {
                 if (++instructionCount > MAX_INSTRUCTIONS)
                     throw new RuntimeException("Max instruction count exceeded (可能死循环)");
@@ -323,7 +213,7 @@ private static boolean isFixedOpcode(int op) {
         new Interpreter(program, Collections.emptyList(), Collections.emptyMap()).run();
     }
 
-    // -------- Literal --------
+    // Literal 
     void pushLiteral(Definitions.Token t) {
         int val = (t.size == 2)
             ? readShortBE((pc + 1) & MEM_MASK)  // 大端读取
@@ -333,7 +223,7 @@ private static boolean isFixedOpcode(int op) {
         pc += (t.size == 2 ? 2 : 1);
     }
 
-    // -------- Parent label 跟踪（仅用于日志/警告）--------
+    // Parent label 跟踪（仅用于日志/警告）
     private void handleCallTracking(Definitions.Token t) {
         if ("JSR".equals(t.value) && t.size == 2 && t.stack == 0) {
             Object _labelTokA = reverseSymbolTable.get(pc - 3);
@@ -355,7 +245,7 @@ private static boolean isFixedOpcode(int op) {
         }
     }
 
-    // -------- Execute --------
+    // Execute 
     public static class Action {
         public final String name;
         public final int argc;       // 需要的参数个数（按 t.size：1=字节，2=字）
@@ -418,7 +308,7 @@ private static boolean isFixedOpcode(int op) {
         ACTION_TABLE.put("STH", new Action("STH", 1, false, Actions::sth)); // 推到另一栈
     }
 ///////////////////////////////////////////////////////////////////////////////////
-// 在 Interpreter.java 中，ACTION_TABLE 初始化块后面紧跟着加：
+// 
 public static final Action[] ACTIONS_BY_BASE = new Action[32];
 static {
     for (int i = 0; i < 32; i++) {
@@ -429,7 +319,7 @@ static {
     }
 }
 
-    // ---- 按“字节/字”弹参数 ----
+    // 按“字节/字”弹参数
 
     /** 仅弹出“一个字节”。若栈顶是 16 位：返回低字节，并把高字节留在栈上（变为 8 位元素）。 */
     private StackElem popOneByte(java.util.Deque<StackElem> S, Definitions.Token t) {
@@ -451,70 +341,10 @@ static {
         return new StackElem((hi << 8) | lo, 2);
     }
 
-    // private boolean executeInstr(Definitions.Token t) {
-    //     String name = t.value; // t.value 本来就是大写
-    //     Action a = ACTION_TABLE.get(name);
-    //     if (a == null) throw new RuntimeException("Unknown instruction: " + t.value);
-
-    //     Deque<StackElem> S = active(t);   // 由 r 位选择工作/返回栈
-
-    //     int sz = t.size;
-    //     StackElem[] args = new StackElem[a.argc];
-    //     // 逐个参数弹出：sz==1 按字节弹；sz==2 按 16 位弹
-    //     for (int i = a.argc - 1; i >= 0; --i) {
-    //         args[i] = (sz == 2) ? popOneWord(S, t) : popOneByte(S, t);
-    //     }
-
-    //     if (Flags.isDebug()) {
-    //         System.err.printf("INSTR %s s=%s r=%s k=%s -> %02X%n",
-    //                 t.value, (t.size == 2), (t.stack == 1), (t.keep == 1),
-    //                 Definitions.getOpcodeByte(t.value, t.size == 2, t.stack == 1, t.keep == 1));
-    //         System.err.flush();
-    //     }
-
-    //     a.impl.apply(this, t, args, sz);
-    //     return "BRK".equals(name);
-    // }
-// 旧：private boolean executeInstr(Definitions.Token t) {
-// 新：
-// 新版：传入 op，普通基码直取，复用 argsBuf
-// private boolean executeInstr(Definitions.Token t, int op) {
-//     // —— 1) 选 Action —— //
-//     Action a;
-//     // 普通基码指令：非 LIT 且 非 0x00/0x20/0x40/0x60
-//     if ((op & 0x80) == 0 && op != 0x00 && op != 0x20 && op != 0x40 && op != 0x60) {
-//         a = ACTIONS_BY_BASE[op & 0x1F];
-//         if (a == null)
-//             throw new RuntimeException("Unknown base opcode index: " + (op & 0x1F));
-//     } else {
-//         // BRK / JCI / JMI / JSI 四个固定编码仍走字符串表（LIT 不会来到这里）
-//         a = ACTION_TABLE.get(t.value); // t.value 原本就大写
-//         if (a == null) throw new RuntimeException("Unknown instruction: " + t.value);
-//     }
-
-//     // —— 2) 出参准备（按 size 弹） —— //
-//     Deque<StackElem> S = active(t);
-//     int sz = t.size, argc = a.argc;
-//     for (int i = argc - 1; i >= 0; --i) {
-//         argsBuf[i] = (sz == 2) ? popOneWord(S, t) : popOneByte(S, t);
-//     }
-
-//     if (Flags.isDebug()) {
-//         System.err.printf("INSTR %s s=%s r=%s k=%s -> %02X%n",
-//                 t.value, (t.size == 2), (t.stack == 1), (t.keep == 1),
-//                 Definitions.getOpcodeByte(t.value, t.size == 2, t.stack == 1, t.keep == 1));
-//         System.err.flush();
-//     }
-
-//     // —— 3) 执行 —— //
-//     a.impl.apply(this, t, argsBuf, sz);
-
-//     // —— 4) BRK 终止 —— //
-//     return (op == 0x00); // 比字符串比较更快
-// }
+ 
 
 private boolean executeInstr(Definitions.Token t, int op) {
-    // —— 1) 选 Action —— //
+    // 选 Action//
     Action a;
     if ((op & 0x80) == 0 && !isFixedOpcode(op)) {
         // 普通基码指令：非 LIT 且 非固定编码
@@ -527,7 +357,7 @@ private boolean executeInstr(Definitions.Token t, int op) {
         if (a == null) throw new RuntimeException("Unknown instruction: " + t.value);
     }
 
-    // —— 2) 出参准备（按 size 弹；复用 argsBuf） —— //
+    // 2) 出参准备（按 size 弹；复用 argsBuf //
     Deque<StackElem> S = active(t);
     int sz = t.size, argc = a.argc;
     for (int i = argc - 1; i >= 0; --i) {
@@ -541,22 +371,22 @@ private boolean executeInstr(Definitions.Token t, int op) {
         System.err.flush();
     }
 
-    // —— 3) 执行 —— //
+    // 执行//
     a.impl.apply(this, t, argsBuf, sz);
 
-    // —— 4) BRK 终止 —— //
+    // BRK 终止 //
     return (op == 0x00); // 比字符串比较更快
 }
 
 
 
 
-    // -------- For Actions access --------
+    // For Actions access 
     public int getPc() { return pc; }
     public void setPc(int value) { pc = value & MEM_MASK; }
     public byte[] mem() { return memory; }
 
-    // -------- Debug --------
+    // Debug
     public void showStacks() {
         System.out.println("WorkStack:   " + workStack);
         System.out.println("ReturnStack: " + returnStack);

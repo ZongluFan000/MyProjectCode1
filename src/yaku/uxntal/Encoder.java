@@ -382,7 +382,7 @@ public class Encoder {
     //反向符号表构建
 
     /**
-     * 构建与 Perl 版一致的反向索引：
+    
      * - 父标签地址：kind=1
      * - 引用地址：根据附近字节判别是调用(JSI/JSR)还是跳转(JMI/JMP)，否则 kind=0
      */
